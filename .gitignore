@@ -1,0 +1,8 @@
+slurm*
+__pycache__/
+docking/
+datasets/
+results/
+!scripts/docking
+!scripts/datasets
+scripts/docking/gnina
