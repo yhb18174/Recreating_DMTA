@@ -1,0 +1,5 @@
+#rsync dir to i_drive
+rsync -avc ~/Recreating_DMTA ~/i_drive/Science/Chemistry/RDMS/David\ Palmer\ group/Huw\ Williams/ > ~/Recreating_DMTA/backup/rsync_logs/backup_$(date +%F_%H-%M-%S).log 2>&1
+
+#rsync dir to i_drive (dry run, wont actually do it)
+rsync -avc --dry-run ~/Recreating_DMTA ~/i_drive/Science/Chemistry/RDMS/David\ Palmer\ group/Huw\ Williams/ > ~/Recreating_DMTA/backup/rsync_logs/backup_$(date +%F).log 2>&1
