@@ -1,16 +1,27 @@
 import pandas as pd
 import sys
 from rdkit import Chem
-from rdkit.Chem import AllChem
 import re
-from datetime import datetime
 from pathlib import Path
 import subprocess
 import time
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
+import os
+
+# Import Openeye Modules
+from openeye import oechem
+from openeye import oeomega
+from openeye import oequacpac
 
 PROJ_DIR= str(Path(__file__).parent.parent.parent)
+
+# Find Openeye licence
+try:
+    print('license file found: %s' % os.environ['OE_LICENSE'])
+except KeyError:
+    print('license file not found, please set $OE_LICENSE')
+    sys.exit('Critical Error: license not found')
 
 class GNINA_fns():
     def __init__(self,
@@ -77,6 +88,218 @@ class GNINA_fns():
         else:
             print('Invalid SMILES string')
     
+    def nonallowed_fragment_tautomers(self,
+                                      molecule):
+
+        fragment_list = ["N=CO",
+                        "C=NCO",
+                        "C(O)=NC",
+                        "c=N",
+                        "N=c",
+                        "C=n",
+                        "n=C"]
+                        
+        for fragment in fragment_list:
+            fragment_search = oechem.OESubSearch(fragment)
+            oechem.OEPrepareSearch(molecule, fragment_search)
+            if fragment_search.SingleMatch(molecule):
+                return False
+                break
+            
+        return True
+    
+    def _mol_enhance(self,
+                        smi: str,
+                        dir: str,
+                        filename: str):
+        
+        mol = Chem.MolFromSmiles(smi)
+        h_mol = Chem.AddHs(mol)
+        h_mol = Chem.MolToMolBlock(h_mol)
+
+        with open(dir + filename + '.sdf', 'w') as file:
+            file.write(h_mol)
+
+    def _mol_prep(self,
+                    smi: str,
+                    sdf: str,
+                    dir: str,
+                    filename: str):
+        
+        lig_sdf_path = dir + filename + '.sdf'
+
+        # Convert file paths to Path objects
+        ligand_sdf_path = Path(lig_sdf_path)
+        before_pH_adjustment_path = ligand_sdf_path.with_name(ligand_sdf_path.stem + '_before_pH_adjustment.sdf')
+        pH74_path = ligand_sdf_path.with_name(ligand_sdf_path.stem + '_pH74.sdf')
+        
+        self._mol_enhance(smi, lig_sdf_path, dir=dir, filename=filename)
+
+        print('Attempting to convert to pH 7.4 (OpenEye)')
+
+        try:
+            ifs = oechem.oemolistream()
+            ifs.open(str(lig_sdf_path))
+
+            ofs = oechem.oemolostream()
+            ofs.SetFormat(oechem.OEFormat_SDF)
+            ofs.open(str(pH74_path))
+
+            mol = oechem.OEGraphMol()
+
+            while oechem.OEReadMolecule(ifs, mol):
+                if oequacpac.OESetNeutralpHModel(mol):
+                    oechem.OEAddExplicitHydrogens(mol)
+                    oechem.OEWriteMolecule(ofs, mol)
+            ifs.close()
+            ofs.close()
+
+            # Rename files using Path methods
+            ligand_sdf_path.rename(before_pH_adjustment_path)
+            pH74_path.rename(ligand_sdf_path)
+
+        except Exception as e:
+            print(f'Failed to convert mol to pH 7.4 for the following reason:\n{e}')
+
+        return
+        
+    def _oe_conformer_generation(self,
+                                 filename,
+                                 tauto_sp23=False,
+                                 torsion_drive=True,
+                                 box_cen=None,
+                                 save_mol2=False,
+                                 save_conf_isomer_ids=True):
+        
+        ligand_in_sdf_fpath = '{}.sdf'.format(filename)
+        ligand_out_sdf_fpath = '{}_confs.sdf'.format(filename)
+
+            # conformer options
+        omega_opts = oeomega.OEOmegaOptions()
+        omega_opts.SetEnergyWindow(20)
+        omega_opts.SetMaxSearchTime(600)
+        omega_opts.SetSearchForceField(7)
+        omega_opts.SetRMSThreshold(0.5) 
+        omega_opts.SetMaxConfs(1000) 
+
+        # Turn off TorsionDrive to prevent search over torsion angles as this will be done in GNINA.
+        # Still need to enumerate over stereoisomers and tautomers though.
+        print('Use TorsionDrive: {}'.format(torsion_drive))
+        omega_opts.SetTorsionDrive(torsion_drive)
+        omega = oeomega.OEOmega(omega_opts)
+
+        # input molecule file
+        ifs = oechem.oemolistream()
+        ifs.open(ligand_in_sdf_fpath)
+
+        # output molecule file
+        ofs_sdf = oechem.oemolostream()
+        ofs_sdf.SetFormat(oechem.OEFormat_SDF)
+        ofs_sdf.open(ligand_out_sdf_fpath)
+
+        # Output conformers in a mol2 file for showing in VMD
+        if save_mol2:
+            ofs_mol2 = oechem.oemolostream()
+            ofs_mol2.SetFormat(oechem.OEFormat_MOL2)
+            ofs_mol2.open(ligand_out_sdf_fpath[:-4]+'.mol2')
+    
+        if save_conf_isomer_ids:
+            conf_isomer_ids = open(ligand_out_sdf_fpath[:-4]+'_conf_isomers.dat', 'w')
+            conf_isomer_ids.write('conf_n,tauto,enant\n')
+
+        tautomer_opts = oequacpac.OETautomerOptions()
+        tautomer_opts.SetMaxSearchTime(300)
+        tautomer_opts.SetRankTautomers(True)
+
+        # SetCarbonHybridization = False stops sp2-sp3 changes in tautomer enumeration
+        # tautomer_opts.SetCarbonHybridization(False)
+        print('Allow C sp2/sp3 conversion in tautomers: {}'.format(tauto_sp23))
+        tautomer_opts.SetCarbonHybridization(tauto_sp23)
+
+        # enantiomer options
+        flipper_opts = oeomega.OEFlipperOptions()
+        flipper_opts.SetMaxCenters(12)
+        flipper_opts.SetEnumSpecifiedStereo(False) # Changed to False to preserve defined stereochemistry
+        flipper_opts.SetEnumNitrogen(True)
+        flipper_opts.SetWarts(False)
+
+        if box_cen is not None:
+            print('Translate to docking box centre: True')
+
+            # generate tautomers, enantiomers and conformers
+            # Record number of tautomers, enantiomers, disallowed isomers
+            n_tauto = 0
+            n_enant = []
+            n_confs = []
+            n_disallowed = 0
+            conf_i = 1
+            for mol in ifs.GetOEMols():
+                
+                for tautomer in oequacpac.OEEnumerateTautomers(mol, tautomer_opts):
+                    n_tauto += 1
+                    n_enant.append(0)
+                    n_confs.append([])
+
+                    # comment out the next line if specific stereocenter is know and encoded in the original mol file
+                    for enantiomer in oeomega.OEFlipper(tautomer, flipper_opts):
+                        # Number of enantiomers for specific tautomer
+                        n_enant[-1] += 1
+                        ligand = oechem.OEMol(enantiomer)
+                        ligand.SetTitle(filename)
+                        
+                        if self.nonallowed_fragment_tautomers(ligand):
+                            ret_code = omega.Build(ligand)
+                            
+                            if ret_code == oeomega.OEOmegaReturnCode_Success:
+                                n_confs[-1].append(ligand.NumConfs())
+                                # Add SD data to indicate tautomer/enantiomer number:
+                                oechem.OESetSDData(ligand, 'tautomer_n', str(n_tauto))
+                                oechem.OESetSDData(ligand, 'isomer_n', str(n_enant[-1]))
+                                # Optionally translate ligand to centre of docking box:
+                                if box_cen is not None:
+                                    # Centre ligands at (0, 0, 0):
+                                    oechem.OECenter(ligand)
+                                    oe_box_cen = oechem.OEDoubleArray(3)
+                                    for i in range(3):
+                                        oe_box_cen[i] = box_cen[i]
+                                    # Move ligands to docking box centre:
+                                    oechem.OETranslate(ligand, oe_box_cen)
+                                #oechem.OEWriteMolecule(ofs, ligand)
+                                oechem.OEWriteMolecule(ofs_sdf, ligand)
+                                if save_mol2:
+                                    oechem.OEWriteMolecule(ofs_mol2, ligand)
+                                if save_conf_isomer_ids:
+                                    for _ in range(n_confs[-1][-1]):
+                                        conf_isomer_ids.write('{},{},{}\n'.format(conf_i, n_tauto, n_enant[-1]))
+                                conf_i += 1
+                        else:
+                            n_disallowed += 1
+            conf_isomer_ids.close()
+
+            ifs.close()
+            #ofs.close()
+            ofs_sdf.close()
+            
+            print('Conformer generation: tautomers:', n_tauto)
+            print('                      enantiomers:', n_enant)
+            print('                      number disallowed:', n_disallowed)
+            print('                      final number:', sum(n_enant) - n_disallowed)
+            print('                      number of individual 3D conformers:', n_confs)
+
+            return n_tauto, n_enant, n_disallowed, n_confs
+    
+    def OEGenConfs(self,
+                   smi,
+                   filename,
+                    tauto_sp23=False,
+                    ph=True,
+                    torsion_drive=True,
+                    box_cen=None):
+        
+        # ligand_prefix = ligand_mol_fpath[:-4]
+        self._mol_prep(smi, filename, ph)
+        self._oe_conformer_generation(filename, tauto_sp23=tauto_sp23, torsion_drive=torsion_drive, box_cen=box_cen)
+
     def Run_GNINA(self,
                   max_time: int=10,
                   n_cpus: int=1,
@@ -268,11 +491,73 @@ class Run_MP_GNINA():
         self.cnn_scoring=cnn_scoring
         self.gnina_path=gnina_path
         self.env_name=env_name
+    
+    def _mol_enhance(self,
+                    smi: str,
+                    sdf_fpath: str):
+        
+        mol = Chem.MolFromSmiles(smi)
+        h_mol = Chem.AddHs(mol)
+        h_mol = Chem.MolToMolBlock(h_mol)
 
+        with open(sdf_fpath, 'w') as file:
+            file.write(h_mol)
 
+    def _mol_prep(self,
+                    smi: str,
+                    molid: str,
+                    mol_dir: str,
+                    ph=True):
+        
+        lig_sdf_path = mol_dir + molid + '.sdf'
+
+        # Convert file paths to Path objects
+        ligand_sdf_path = Path(lig_sdf_path)
+        before_pH_adjustment_path = ligand_sdf_path.with_name(ligand_sdf_path.stem + '_before_pH_adjustment.sdf')
+        pH74_path = ligand_sdf_path.with_name(ligand_sdf_path.stem + '_pH74.sdf')
+        
+        self._mol_enhance(smi, lig_sdf_path)
+
+        print('Attempting to convert to pH 7.4 (OpenEye)')
+
+        try:
+            ifs = oechem.oemolistream()
+            ifs.open(str(lig_sdf_path))
+
+            ofs = oechem.oemolostream()
+            ofs.SetFormat(oechem.OEFormat_SDF)
+            ofs.open(str(pH74_path))
+
+            mol = oechem.OEGraphMol()
+
+            while oechem.OEReadMolecule(ifs, mol):
+                if oequacpac.OESetNeutralpHModel(mol):
+                    oechem.OEAddExplicitHydrogens(mol)
+                    oechem.OEWriteMolecule(ofs, mol)
+            ifs.close()
+            ofs.close()
+
+            # Rename files using Path methods
+            ligand_sdf_path.rename(before_pH_adjustment_path)
+            pH74_path.rename(ligand_sdf_path)
+
+        except Exception as e:
+            print(f'Failed to convert mol to pH 7.4 for the following reason:\n{e}')
+
+        return pH74_path
+        
+    def _make_ph74_sdfs(self):
+
+        self.sdf_path_ls = []
+        for molid, smi, molid_dir in zip(self.molid_ls, self.smi_ls, self.mol_dir_path_ls):
+            path = self._mol_prep(smi=smi, molid=molid, mol_dir=molid_dir)
+            self.sdf_path_ls.append(str(path))
+
+        return self.sdf_path_ls
+    
     def _make_sdfs(self):
 
-        sdf_path_ls = []
+        self.sdf_path_ls = []
 
         for molid, smi, molid_dir in zip(self.molid_ls, self.smi_ls, self.mol_dir_path_ls):
         
@@ -286,11 +571,11 @@ class Run_MP_GNINA():
             # Write to SDF file
                 with Chem.SDWriter(molid_dir + molid + '.sdf') as writer:
                     writer.write(mol)
-                sdf_path_ls.append(molid_dir + molid + '.sdf')
+                self.sdf_path_ls.append(molid_dir + molid + '.sdf')
             else:
                 print(f'Invalid SMILES string: \n{smi}')
 
-        return sdf_path_ls
+        return self.sdf_path_ls
     
     def _create_submit_script(self,
                              molid: str,
@@ -389,7 +674,7 @@ fi
 
         while True:
             dock_jobs = []
-            squeue = subprocess.check_output(['squeue', '--users', 'yhb18174'], text=True)
+            squeue = subprocess.check_output(['squeue', '--users', username], text=True)
             lines = squeue.splitlines()
 
             job_lines = {line.split()[0]: line for line in lines if len(line.split()) > 0}

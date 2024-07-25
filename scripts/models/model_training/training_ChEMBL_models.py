@@ -8,7 +8,7 @@ from RF_class import RF_model
 import pandas as pd
 
 model=RF_model()
-n_resamples = 50
+n_resamples = 30
 inner_cv_type = 'kfold',
 n_splits = 5
 tr_te_split = 0.3
@@ -28,12 +28,12 @@ hyper_params = \
 rdkit_desc_path = '/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/desc/rdkit/ChEMBL_rdkit_desc_1.csv.gz'
 mordred_desc_path = '/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/desc/mordred/ChEMBL_mordred_desc_1.csv.gz'
 targets_path = '/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/dock/ChEMBL_docking_df.csv'
-rdkit_save_path = '/users/yhb18174/Recreating_DMTA/RF_model/results/rdkit_desc/init_RF_model/it0'
-mordred_save_path = '/users/yhb18174/Recreating_DMTA/RF_model/results/mordred_desc/init_RF_model/it0'
+rdkit_save_path = '/users/yhb18174/Recreating_DMTA/results/rdkit_desc/init_RF_model/it0'
+mordred_save_path = '/users/yhb18174/Recreating_DMTA/results/mordred_desc/init_RF_model/it0'
 
 rdkit_features = pd.read_csv(rdkit_desc_path, index_col='ID', compression='gzip')
 targets_df = pd.read_csv(targets_path, index_col='ID')
-targets = targets_df['affinity_exp'].values.ravel()
+targets = targets_df['CNN_affinity'].values.ravel()
 
 rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type,
                                                    scoring=loss_function,
@@ -50,18 +50,18 @@ rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type
                                                    plot_feat_importance=True)
 
 
-mordred_features = pd.read_csv(mordred_desc_path, index_col='ID')
+# mordred_features = pd.read_csv(mordred_desc_path, index_col='ID')
 
-rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type,
-                                                   scoring=loss_function,
-                                                   n_resamples=n_resamples,
-                                                   inner_cv_type=inner_cv_type,
-                                                   n_splits=n_splits,
-                                                   test_size=tr_te_split,
-                                                   test=False,
-                                                   hyper_params=hyper_params,
-                                                   features=mordred_features,
-                                                   targets=targets,
-                                                   save_path=mordred_save_path,
-                                                   save_final_model=True,
-                                                   plot_feat_importance=True)
+# rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type,
+#                                                    scoring=loss_function,
+#                                                    n_resamples=n_resamples,
+#                                                    inner_cv_type=inner_cv_type,
+#                                                    n_splits=n_splits,
+#                                                    test_size=tr_te_split,
+#                                                    test=False,
+#                                                    hyper_params=hyper_params,
+#                                                    features=mordred_features,
+#                                                    targets=targets,
+#                                                    save_path=mordred_save_path,
+#                                                    save_final_model=True,
+#                                                    plot_feat_importance=True)

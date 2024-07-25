@@ -8,7 +8,7 @@ import openeye as oe
 from openeye import oechem
 import openbabel as ob
 import numpy as np
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Process
 from pathlib import Path
 import tempfile
 from io import StringIO
@@ -958,7 +958,7 @@ class mp_Dataset_Formatter():
             # Isolating each output list
             frag_smi_list = [result[1] for result in results if results[0]]
             canon_smi_list = [result[2] for result in results if results[0]]
-            canon_mol_list = [Chem.MolFromSmiles(x) for x in canon_smi_list]
+            canon_mol_list =  [result[3] for result in results if results[0]]
             kekulised_smi_ls = [self._kekulise_smiles(mol) for mol in canon_mol_list]
 
             return canon_mol_list, frag_smi_list, canon_smi_list, kekulised_smi_ls
@@ -1001,96 +1001,57 @@ class mp_Dataset_Formatter():
 
         enumerator = rdMolStandardize.TautomerEnumerator()
         canon_mol = enumerator.Canonicalize(mol)
-
+        canon_smi = Chem.MolToSmiles(canon_mol)
 
         # If maintaining the original core is not an issue then just canonicalise as usual,
         # Does not show fragment SMILES strings
         if not keep_core:
-            has_core = True
-            frag_smi = None
-            canon_smi = Chem.MolToSmiles(canon_mol)
-            return has_core, frag_smi, canon_smi
+            return True, None, canon_smi, canon_mol
+        
+        if core_smi is None:
+            raise ValueError("Invalid core SMILES string provided.")
 
-        # Path to keep ingthe tautomeric form of the original core
-        else:
-            core_mol = Chem.MolFromSmiles(core_smi)
+        core_mol = Chem.MolFromSmiles(core_smi)        
             
-            # Initialising the enumerator, canonicalising the molecule and obtaining all tautomeric
-            # forms of the original core
-            core_tauts = enumerator.Enumerate(core_mol)
+        # Initialising the enumerator, canonicalising the molecule and obtaining all tautomeric
+        # forms of the original core
+        core_tauts = enumerator.Enumerate(core_mol)
 
-            # Setting flag for whether molecules have a one of the tautomeric cores
-            has_core=False
 
-            # Checking if the mol has the original core
-            if canon_mol.HasSubstructMatch(core_mol):
+        # Checking if the mol has the original core
+        if canon_mol.HasSubstructMatch(core_mol):
+            # If so, return the canonical smiles, fragment and core flag
+            frag_mol = Chem.ReplaceCore(mol, core_mol)
+            frag_smile = Chem.MolToSmiles(frag_mol)
 
-                # If so, return the canonical smiles, fragment and core flag
-                has_core = True
-                canon_smi = Chem.MolToSmiles(canon_mol)
-                frag_mol = Chem.ReplaceCore(mol, core_mol)
-                frag_smile = Chem.MolToSmiles(frag_mol)
-
-                return has_core, frag_smile, canon_smi
+            return True, frag_smile, canon_smi, canon_mol
             
-            # If it doesnt have the original core, check the tautomeric forms
-            else:
-                for tautomers in core_tauts:
-                    
-                    # If it has one of the tautometic forms, substitute the core with
-                    # a dummy atom
-                    if mol.HasSubstructMatch(tautomers):
-                        has_core=True
-                        frag_mol=Chem.ReplaceCore(mol, tautomers)
-                        frag_smile = Chem.MolToSmiles(frag_mol)
+        # If it doesnt have the original core, check the tautomeric forms
+        for taut in core_tauts:
+            
+            # If it has one of the tautometic forms, substitute the core with
+            # a dummy atom
+            if canon_mol.HasSubstructMatch(taut):
+                frag_mol=Chem.ReplaceCore(mol, taut)
+                dummy_idx = next(atom.GetIdx() for atom in frag_mol.GetAtoms() is atom.GeySymbol() == '*')
+                neighbour_idx = next(bond.GetOtherAtomIdx(dummy_idx) for bond in frag_mol.GetAtomWithIdx(dummy_idx).GetBonds())
                 
-                        # Canonicalise the fragment and specify atom positions
-                        canon_frag_mol = enumerator.Canonicalize(frag_mol)
-                        frag_atoms = canon_frag_mol.GetAtoms()
+                frag_mol = Chem.EditableMol(frag_mol)
+                frag_mol.RemoveAtom(dummy_idx)
+                frag_mol = frag_mol.GetMol()
+                frag_smi = Chem.MolToSmiles(frag_mol)
 
-                        # Find the dummy atom position
-                        for atom in frag_atoms:
-                            if atom.GetSymbol() == '*':
-                                
-                                # Find which atom was bonded to the dummy atom
-                                # (which where the original core was bonded)
-                                bonds = canon_frag_mol.GetAtomWithIdx(atom.GetIdx()).GetBonds()
-                                dummy_pos = atom.GetIdx()
+                combined_mol = Chem.CombineMols(frag_mol, core_smi)
+                combined_mol = Chem.EditableMole(combined_mol)
+                sub_atom = sub_point + frag_mol.GetNumAtoms() - 1
 
-                                for bond in bonds:
-                                    neighbour_pos = bond.GetOtherAtomIdx(atom.GetIdx())
+                combined_mol.AddBond*neighbour_idx, sub_atom, Chem.rdchem.BondType.SINGLE
+                final_mol = Chem.RemoveHs(combined_mol.GetMol())
+                final_smi = Chem.MolToSmiles(final_mol)
 
-                        # Remove the dummy atom
-                        emol = Chem.EditableMol(canon_frag_mol)
-                        emol.RemoveAtom(dummy_pos)
-                        canon_frag_mol = emol.GetMol()
-                        frag_smile = Chem.MolToSmiles(canon_frag_mol)
+                return True, frag_smi, final_smi, final_mol
 
-                        # Substitute the original core onto the original position
-                        combined_frags = Chem.CombineMols(canon_frag_mol, core_mol)
-                        emol_combined = Chem.EditableMol(combined_frags)
-
-                        # Atom number on core where fragment was subsituted
-                        sub_atom = sub_point + len(frag_atoms) - 1
-
-                        # Add single bond
-                        emol_combined.AddBond(neighbour_pos, sub_atom, Chem.rdchem.BondType.SINGLE)
-                        final_mol = emol_combined.GetMol()
-
-                        # Remove the remaining H atoms (required)
-                        canon_mol = Chem.RemoveHs(final_mol)
-                        canon_smi = Chem.MolToSmiles(canon_mol)
-                        
-                        return has_core, frag_smile, canon_smi
-
-
-                # If it still doesnt have the core just return the canonicalised SMILES
-                # string without the core
-                if not has_core:
-                    frag_smile=None
-                    uncanon_smi = Chem.MolToSmiles(mol)
-                    return has_core, frag_smile, uncanon_smi
-
+        return False, None, canon_smi, canon_mol
     def _adjust_smi_for_ph(self,
                            smi: str,
                            ph: float=7.4,
@@ -1324,17 +1285,16 @@ class mp_Dataset_Formatter():
                    save_chunks: bool=False,
                    save_path: str=None):
         
-        arguments = [(mol_dir, filename, retain_ids, pymolgen, prefix, chunksize)]
+        self.data_ls = []
 
         chunks = self._make_chunks(mol_dir, filename, retain_ids, pymolgen, prefix, chunksize)
         print(f'Total chunks: {len(chunks)}')
 
         arguments = [(mol_type, chunk['SMILES'].tolist(), sub_point, core, keep_core) for chunk in chunks]
 
-        with Pool(processes=-1) as pool:
+        with Pool() as pool:
             results = pool.map(self._process_mols_wrapper, arguments)
 
-        self.data_ls = []
         for i, (chunk, item) in enumerate(zip(chunks, results)):
             print(f'Processing chunk {i+1}')
 
@@ -1350,8 +1310,6 @@ class mp_Dataset_Formatter():
             'Kekulised_SMILES': kek_smi_ls
                 }
             
-            #print(f'Data in shape\nID: {len(chunk.index)}\nMol: {len(canon_mol_ls)}\nFrags: {len(frag_smi_ls)}\nSMILES: {len(ph_canon_smi_ls)}\nKek SMILES: {len(kek_smi_ls)}')
-            
             smi_df = pd.DataFrame(data)
             lilly_smi_df = self._apply_lilly_rules(smi_df)
 
@@ -1359,7 +1317,6 @@ class mp_Dataset_Formatter():
 
             if save_chunks:
                 lilly_smi_df.to_csv(f'{save_path}/raw_chunks_{i+1}.csv.gz', index='ID', compression='gzip')
-
 
         return self.data_ls
 

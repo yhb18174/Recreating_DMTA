@@ -3,7 +3,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, KFold, RandomizedSearchCV, train_test_split
 from sklearn.datasets import make_regression
 from sklearn.metrics import mean_squared_error, r2_score
-from scipy.stats import pearsonr, spearmanr
 import numpy as np
 import joblib
 from joblib import Parallel, delayed
@@ -74,8 +73,6 @@ class RF_model():
         errors = target_test - predictions
 
         # Calculate performance metrics
-        # FIX SDEP, MSE
-
         bias = np.mean(errors)
         sdep = np.std(errors)
         mse = mean_squared_error(target_test, predictions)
@@ -330,7 +327,6 @@ class RF_model():
 
         print(f'Performing resample {n + 1}')
 
-
         feat_tr, feat_te, tar_tr, tar_te = train_test_split(features, targets, test_size=test_size, random_state=rng)
         
         # Convert DataFrames to NumPy arrays if necessary
@@ -395,16 +391,19 @@ class RF_model():
                                             scoring=scoring,
                                             random_state=rand.randint(0, 2**31))
 
+        results = []
+        # Sequentially process each task without multiprocessing
+        for n in tqdm(range(n_resamples), desc="Resamples submitted"):
+            result = self._fit_model_and_evaluate(n, features, targets, test_size, save_interval_models, save_path)
+            results.append(result)
 
-        with Parallel(n_jobs=-1) as parallel:
-            results = parallel(
-                                delayed(self._fit_model_and_evaluate)(
-                                n, features, targets, test_size, save_interval_models, save_path
-                                ) for n in  tqdm(range(n_resamples), desc="Resamples submitted")
-            )
-
-        while len(results) < n_resamples:
-            time.sleep(10)
+        #Attempt of Parallelisation
+        # with Parallel(n_jobs=-1, batch_size=5) as parallel:
+        #     results = parallel(
+        #                         delayed(self._fit_model_and_evaluate)(
+        #                         n, features, targets, test_size, save_interval_models, save_path
+        #                         ) for n in  tqdm(range(n_resamples), desc="Resamples submitted")
+        #     )
 
         print('Resamples completed.')
 

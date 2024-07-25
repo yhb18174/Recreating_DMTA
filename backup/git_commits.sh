@@ -2,6 +2,10 @@
 
 cd /users/yhb18174/Recreating_DMTA/
 
-git add ./scripts/
+git checkout stage
+
+git add .
 
 git commit -m "Automatic commit"
+
+git push -u github stage
