@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 import sys
 from rdkit import RDLogger
+from glob import glob
 
 lg = RDLogger.logger()
 lg.setLevel(RDLogger.CRITICAL)
@@ -117,6 +118,8 @@ if make_full_data:
     desc_filepath = '/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/desc/'
     docking_dir = '/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/docking/'
 
+    premade_chunks = glob(f'/users/yhb18174/Recreating_DMTA/datasets/temp/temp_*.csv.gz')
+
 
     mk = Dataset_Formatter()
 
@@ -128,7 +131,8 @@ if make_full_data:
                          prefix='PMG-',
                          mol_type='smiles',
                          chunksize=chunksize,
-                         retain_ids=retain_ids)
+                         retain_ids=retain_ids,
+                         temp_files=premade_chunks)
     
     print(data)
     
