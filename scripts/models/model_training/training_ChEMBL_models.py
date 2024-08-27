@@ -8,7 +8,7 @@ from RF_class import RF_model
 import pandas as pd
 
 model=RF_model()
-n_resamples = 30
+n_resamples = 50
 inner_cv_type = 'kfold',
 n_splits = 5
 tr_te_split = 0.3
@@ -17,7 +17,7 @@ loss_function = 'neg_mean_squared_error'
 
 hyper_params = \
     {
-    'n_estimators': [300, 400, 500],
+    'n_estimators': [500],
     'max_features': [1/3],
     'max_depth': [50, 100, 150, 200],
     'min_samples_split': [2, 5, 10],
@@ -35,24 +35,7 @@ rdkit_features = pd.read_csv(rdkit_desc_path, index_col='ID', compression='gzip'
 targets_df = pd.read_csv(targets_path, index_col='ID')
 targets = targets_df['CNN_affinity'].values.ravel()
 
-rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type,
-                                                   scoring=loss_function,
-                                                   n_resamples=n_resamples,
-                                                   inner_cv_type=inner_cv_type,
-                                                   n_splits=n_splits,
-                                                   test_size=tr_te_split,
-                                                   test=False,
-                                                   hyper_params=hyper_params,
-                                                   features=rdkit_features,
-                                                   targets=targets,
-                                                   save_path=rdkit_save_path,
-                                                   save_final_model=True,
-                                                   plot_feat_importance=True)
-
-
-# mordred_features = pd.read_csv(mordred_desc_path, index_col='ID')
-
-# rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type,
+# rf, params, perf, feats = model.Train_Regressor(search_type=search_type,
 #                                                    scoring=loss_function,
 #                                                    n_resamples=n_resamples,
 #                                                    inner_cv_type=inner_cv_type,
@@ -60,8 +43,29 @@ rf, params, perf, feats = model.Train_Regressor_parallel(search_type=search_type
 #                                                    test_size=tr_te_split,
 #                                                    test=False,
 #                                                    hyper_params=hyper_params,
-#                                                    features=mordred_features,
+#                                                    features=rdkit_features,
 #                                                    targets=targets,
-#                                                    save_path=mordred_save_path,
+#                                                    save_path=rdkit_save_path,
 #                                                    save_final_model=True,
-#                                                    plot_feat_importance=True)
+#                                                    plot_feat_importance=True,
+#                                                    parallelise=True,
+#                                                    batch_size=2)
+
+
+mordred_features = pd.read_csv(mordred_desc_path, index_col='ID')
+
+rf, params, perf, feats = model.Train_Regressor(search_type=search_type,
+                                                   scoring=loss_function,
+                                                   n_resamples=n_resamples,
+                                                   inner_cv_type=inner_cv_type,
+                                                   n_splits=n_splits,
+                                                   test_size=tr_te_split,
+                                                   test=False,
+                                                   hyper_params=hyper_params,
+                                                   features=mordred_features,
+                                                   targets=targets,
+                                                   save_path=mordred_save_path,
+                                                   save_final_model=True,
+                                                   plot_feat_importance=True,
+                                                   parallelise=True,
+                                                   batch_size=2)

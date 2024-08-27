@@ -15,8 +15,8 @@ from io import StringIO
 import subprocess
 import glob
 import time
-import gc
-import os
+from tqdm import tqdm
+import traceback
 
 lg = RDLogger.logger()
 lg.setLevel(RDLogger.CRITICAL)
@@ -214,10 +214,17 @@ class Dataset_Formatter:
         # Isolating each output list
         frag_smi_list = [result[1] for result in results if results[0]]
         canon_smi_list = [result[2] for result in results if results[0]]
-        canon_mol_list = [result[3] for result in results if results[0]]
-        kekulised_smi_ls = [self._kekulise_smiles(mol) for mol in canon_mol_list]
 
-        return canon_mol_list, frag_smi_list, canon_smi_list, kekulised_smi_ls
+        # Converting them to pH 7.4
+        ph74_smi_ls = [
+            self._adjust_smi_for_ph(smi, phmodel="OpenEye") for smi in canon_smi_list
+        ]
+        ph74_mol_ls = [Chem.MolFromSmiles(smi) for smi in ph74_smi_ls]
+        kekulised_smi_ls = [
+            Chem.MolToSmiles(mol, kekuleSmiles=True) for mol in ph74_mol_ls
+        ]
+
+        return ph74_mol_ls, frag_smi_list, ph74_smi_ls, kekulised_smi_ls
 
     def _process_mols_wrapper(self, args):
         """
@@ -374,6 +381,7 @@ class Dataset_Formatter:
         smiles: list = [],
         cleanup: bool = True,
         run_in_temp_dir: bool = True,
+        smi_input_filename: str = None,
         lilly_rules_script: str = str(ROOT_DIR)
         + "/Lilly-Medchem-Rules/Lilly_Medchem_Rules.rb",
     ):
@@ -423,11 +431,18 @@ class Dataset_Formatter:
         else:
             run_dir = "./"
 
-        # Lilly rules script reads the file suffix so needs to be .smi:
-        temp = tempfile.NamedTemporaryFile(mode="w+", suffix=".smi", dir=run_dir)
-        temp.write(smi_file_txt)
-        # Go to start of file:
-        temp.seek(0)
+        # If filename given, save SMILES to this file:
+        if smi_input_filename is not None:
+            with open(run_dir + smi_input_filename, "w") as temp:
+                temp.write(smi_file_txt)
+
+        # If no filename given just use a temporary file:
+        else:
+            # Lilly rules script reads the file suffix so needs to be .smi:
+            temp = tempfile.NamedTemporaryFile(mode="w+", suffix=".smi", dir=run_dir)
+            temp.write(smi_file_txt)
+            # Go to start of file:
+            temp.seek(0)
 
         # Run Lilly rules script
         lilly_results = subprocess.run(
@@ -471,6 +486,8 @@ class Dataset_Formatter:
         # Close and remove tempfile:
         # (Do this even if run in a temporary directory to prevent warning when
         # script finishes and tries to remove temporary file at that point)
+        if smi_input_filename is None:
+            temp.close()
 
         if run_in_temp_dir:
             temp_dir.cleanup()
@@ -505,8 +522,6 @@ class Dataset_Formatter:
                 )
             )
 
-        # df['Lilly_rules_pass'].fillna(False, inplace=True)
-
         return df_out.set_index("ID")
 
     def _adjust_smi_for_ph(self, smi: str, ph: float = 7.4, phmodel: str = "OpenEye"):
@@ -514,7 +529,8 @@ class Dataset_Formatter:
         Description
         -----------
         Function to adjust smiles strings for a defined pH value
-
+        canon_mol_list = [result[3] for result in results if results[0]]
+        kekulised_smi_ls = [self._kekulise_smiles(mol) for mol in canon_mol_list]
         Parameters
         ----------
         smi (str)       SMILES string you want to adjust
@@ -659,6 +675,36 @@ class Dataset_Formatter:
         """
         return self._get_descriptors(*args)
 
+    def _gen_descriptors(self, mol, descriptor_set:str, missingVal=None):
+        if descriptor_set == 'RDKit':
+            for name, func in Descriptors._descList:
+                try:
+                    val = func(mol)
+                except Exception:
+                    traceback.print_exc()
+                    val = missingVal
+                yield name, val
+        
+        elif descriptor_set == 'Mordred':
+            calc = Calculator(descriptors, ignore_3D=True)
+
+            try:
+                desc = calc(mol)
+                for name, value in desc.items():
+                    yield str(name), np.float32(value) if value is not None else missingVal
+            except Exception as e:
+                traceback.print_exc()
+                for descriptor in calc.descriptors:
+                    yield str(descriptor), missingVal
+
+    def _descriptor_worker(self, smi, descriptor_set, missingVal=None):
+        mol = Chem.MolFromSmiles(smi)
+        if mol is not None:
+            descriptor_dict = dict(self._gen_descriptors(mol, descriptor_set, missingVal))
+            return descriptor_dict
+        return {}
+    
+        
     def LoadData(
         self,
         mol_dir: str,
@@ -676,6 +722,7 @@ class Dataset_Formatter:
         save_name: str = "PyMolGen",
         save_path: str = f"{PROJ_DIR}/datasets/temp",
         temp_files: list = None,
+        remove_temp_files: bool = True,
     ):
         """
         Description
@@ -704,10 +751,12 @@ class Dataset_Formatter:
         -------
         List of final file pathways to .csv.gz files
         """
+        print("\n=======================\nLoading Data\n=======================\n")
+
+        self.final_file_ls = []
 
         if temp_files is None:
             temp_files = []
-            self.final_file_ls = []
 
             chunks = self._make_chunks(
                 mol_dir, filename, retain_ids, pymolgen, prefix, chunksize
@@ -721,32 +770,21 @@ class Dataset_Formatter:
                 chunk.to_csv(tmp_file, index="ID", compression="gzip")
                 temp_files.append(tmp_file)
 
-            else:
-                chunks = [
-                    pd.read_csv(tmp_file, index_col="ID", compression="gzip")
-                    for tmp_file in temp_files
-                ]
+        else:
+            chunks = [
+                pd.read_csv(tmp_file, index_col="ID", compression="gzip")
+                for tmp_file in temp_files
+            ]
 
         arguments = [
             (mol_type, file, column, sub_point, core, keep_core) for file in temp_files
         ]
 
-        results = []
-        for i, args in enumerate(arguments):
-            print(f"Processing chunk {i+1}")
-            results.append(self._process_mols_wrapper(arguments[i]))
-
-        # with Pool() as pool:
-        #     results = pool.map(self._process_mols_wrapper, arguments)
-
-        for i, (chunk, item) in enumerate(zip(chunks, results)):
-            print(f"Processing chunk {i+1}")
-
-            canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = item
-
-            canon_smi_ls = [
-                self._adjust_smi_for_ph(smi, phmodel="OpenEye") for smi in canon_smi_ls
-            ]
+        for i, (chunk, args) in enumerate(
+            tqdm(zip(chunks, arguments), desc="Processing chunks", unit="chunks", total=len(chunks))
+        ):
+            processed_mols = self._process_mols_wrapper(args)
+            canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = processed_mols
 
             data = {
                 "ID": chunk.index,
@@ -759,21 +797,54 @@ class Dataset_Formatter:
             smi_df = pd.DataFrame(data)
             lilly_smi_df = self._apply_lilly_rules(smi_df)
 
-            for file in temp_files:
-                file = Path(file)
-                if file.exists():
-                    file.unlink()
+            if remove_temp_files:
+                for file in temp_files:
+                    file = Path(file)
+                    if file.exists():
+                        file.unlink()
 
             if save_chunks:
-                save_to = f"{save_path}/{save_name}_{i+1}.csv.gz"
+                save_to = f"{save_path}{save_name}_{i+1}.csv.gz"
                 self.final_file_ls.append(save_to)
                 lilly_smi_df.drop(columns=["Mol"], inplace=True)
                 lilly_smi_df.to_csv(save_to, index="ID", compression="gzip")
+                print(f"Made chunk with path:\n{save_to}")
 
         return self.final_file_ls
 
+    def _calc_desc_mp(
+            self, chunk: pd.DataFrame, descriptor_set: str
+    ):
+        rows = chunk.to_dict("records")
+
+        descriptors = [
+            (
+                Chem.MolFromSmiles(row['SMILES']),
+                None,
+                descriptor_set,
+            )
+            for row in rows
+        ]
+         
+        with Pool() as pool:
+            desc_mp_item = pool.map(self._get_descriptors_wrapper, descriptors)
+
+        return desc_mp_item
+
+    def _gen_desc_mp(
+        self, chunk: pd.DataFrame, descriptor_set: str, missingVal=None
+    ):
+        rows = chunk.to_dict("records")
+
+        args = [(row['SMILES'], descriptor_set, missingVal) for row in rows]
+         
+        with Pool() as pool:
+            desc_mp_item = pool.starmap(self._descriptor_worker, args)
+
+        return desc_mp_item
+
     def CalcDescriptors(
-        self, df_list: list = None, descriptor_set: str = "RDKit", tmp_dir: str = None
+        self, descriptor_set: str, csv_list: list = None, tmp_dir: str = None
     ):
         """
         Description
@@ -782,53 +853,40 @@ class Dataset_Formatter:
 
         Parameters
         ----------
-        df (pd.DataFrame)       pd.DataFrame you want to calculate descriptors for, must have
-                                column named 'Mol' containing RDKit mol objects
         descriptor_set (str)    Choose the descriptor set you want to generate in the (_get_descriptors() function)
                                 either 'RDKit' or 'Mordred'
-
+        csv_list (list)         List of pregenerated csv files coming from the LoadData function.
+        tmp_dir (str)           Save results in the tmp_dir
+        
         Returns
         -------
         1: List of file pathways to the descriptor files
         2: List of file pathways to the full files
         """
-
+        print("\n=======================\nCalculating descriptors\n=======================\n")
         # Setting up temporary df so to not save over self.smi_df
-        if df_list is not None:
-            tmp_df_ls = [
-                pd.read_csv(file, index_col="ID", compression="gzip")
-                for file in df_list
-            ]
-        else:
-            tmp_df_ls = [
-                pd.read_csv(file, index_col="ID", compression="gzip")
-                for file in self.final_file_ls
-            ]
+        if csv_list is not None:
+            self.final_file_ls = csv_list
 
         self.desc_fpath_ls = []
         self.full_fpath_ls = []
 
-        for i, tmp_df in enumerate(tmp_df_ls):
+        for i, file in enumerate(
+            tqdm(self.final_file_ls, desc='Processing chunks', unit='chunks')
+        ):
+            tmp_df = pd.read_csv(file, index_col='ID', compression='gzip')
+            chunks = np.array_split(tmp_df, np.ceil(len(tmp_df)/1000))
             # Getting the descriptors for each mol object and saving the dictionary
             # in a column named descriptors
-            rows = tmp_df.to_dict("records")
 
-            with Pool() as pool:
-                desc_mp_item = pool.map(
-                    self._get_descriptors_wrapper,
-                    [
-                        (
-                            [Chem.MolFromSmiles(x) for x in row["SMILES"]],
-                            None,
-                            descriptor_set,
-                        )
-                        for row in rows
-                    ],
-                )
+            desc_ls = []
+            for chunk in chunks:
+                desc_mp_item = self._gen_desc_mp(chunk, descriptor_set=descriptor_set)
+                desc_ls.extend(desc_mp_item)
 
             # Making a new pd.Dataframe with each descriptor as a column, setting the
             # index to match self.smi_df (or tmp_df)
-            tmp_df["Descriptors"] = desc_mp_item
+            tmp_df["Descriptors"] = desc_ls
 
             if descriptor_set == "RDKit":
                 desc_df = pd.DataFrame(
@@ -850,6 +908,10 @@ class Dataset_Formatter:
                 desc_df.rename(columns={"naRing": "NumAromaticRings"}, inplace=True)
             if "MW" in desc_df.columns:
                 desc_df.rename(columns={"MW": "MolWt"}, inplace=True)
+            if "NumHAcceptors" not in desc_df.columns:
+                desc_df = desc_df.rename(columns={"nHBAcc": "NumHAcceptors"})
+            if "NumHDonors" not in desc_df.columns:
+                desc_df = desc_df.rename(columns={"nHBDon": "NumHDonors"})
 
             desc_filename = f"{tmp_dir}{descriptor_set}_desc_batch_{i+1}.csv.gz"
             desc_df.to_csv(desc_filename, index="ID", compression="gzip")
@@ -869,16 +931,22 @@ class Dataset_Formatter:
 
         return self.desc_fpath_ls, self.full_fpath_ls
 
+    
     def FilterMols(
         self,
+        rdkit_or_mordred: str,
         mw_budget: int = 600,
         n_arom_rings_limit: int = 3,
         PFI_limit: int = 8,
         remove_3_membered_rings: bool = True,
         remove_4_membered_rings: bool = True,
+        num_h_acc: int = 11,
+        num_h_don: int = 6,
         pass_lilly_rules: bool = True,
         chembl: bool = False,
-        tmp_dir: str = None,
+        save_dir: str = None,
+        chunksize: int = 1000,
+        full_fpath_ls: list = []
     ):
         """
         Description
@@ -887,6 +955,7 @@ class Dataset_Formatter:
 
         Parameters
         ----------
+        rdkit_or_mordred (str)          String to save file names
         mw_budget (int)                 Setting a molecular weight budget for molecules
         n_arom_rings_limit (int)        Setting a limit for the number of aromatic rings for molecule
         PFI_limit (int)                 Setting a PFI limit for molecules (need to implement after
@@ -898,42 +967,61 @@ class Dataset_Formatter:
         -------
         A list of file pathways to filtered chunks
         """
+        
+        print("\n=======================\nFiltering Molecules\n=======================\n")
 
         self.filt_fpath_ls = []
-        full_df_ls = [
-            pd.read_csv(file, index_col="ID", compression="gzip")
-            for file in self.full_fpath_ls
-        ]
+        if full_fpath_ls:
+            self.full_fpath_ls = full_fpath_ls
+        else:
+            print('No files to process')
+            return []
+        
+        for i, file in enumerate(
+            tqdm(self.full_fpath_ls, desc="Filtering chunks", unit="chunks")
+        ):
+            chunk_reader = pd.read_csv(file, index_col='ID', compression='gzip', chunksize=chunksize)
+            filtered_chunks = []
 
-        for i, df in enumerate(full_df_ls):
-            if not chembl:
-                # Obtaining all molecules which pass the defined filters
-                all_passing_mols = df[
-                    (df["MolWt"] <= mw_budget)
-                    & (df["NumAromaticRings"] <= n_arom_rings_limit)
-                    & (df["PFI"] <= PFI_limit)
-                    & (df["Lilly_rules_pass"] == pass_lilly_rules)
-                ]
+            for df in chunk_reader:
+                if not chembl:
+                    # Obtaining all molecules which pass the defined filters
+                    all_passing_mols = df[
+                        (df["MolWt"] <= mw_budget)
+                        & (df["NumAromaticRings"] <= n_arom_rings_limit)
+                        & (df["PFI"] <= PFI_limit)
+                        & (df["Lilly_rules_pass"] == pass_lilly_rules)
+                        & (df['NumHDonors'] <= num_h_don)
+                        & (df['NumHAcceptors'] <= num_h_acc)
+                    ]
 
-                filtered_smi = []
-                for index, rows in all_passing_mols.iterrows():
-                    for mol in rows["Mol"].GetRingInfo().AtomRings():
-                        if (remove_3_membered_rings and len(mol) == 3) or (
-                            remove_4_membered_rings and len(mol) == 4
-                        ):
-                            filtered_smi.append(rows["SMILES"])
+                    all_passing_mols = all_passing_mols.copy()
 
-                filtered_results = all_passing_mols[~df["SMILES"].isin(filtered_smi)]
-            columns_to_drop = ["Mol"]
+                    all_passing_mols.loc[:, 'Mol'] = all_passing_mols['Lilly_rules_SMILES'].apply(lambda x: Chem.MolFromSmiles(x))
+                    all_passing_mols = all_passing_mols[all_passing_mols['Mol'].notna()]
 
-            if chembl:
-                filtered_results = df
+                    filtered_smi = []
+                    for index, rows in all_passing_mols.iterrows():
+                        for mol in rows["Mol"].GetRingInfo().AtomRings():
+                            if (remove_3_membered_rings and len(mol) == 3) or (
+                                remove_4_membered_rings and len(mol) == 4
+                            ):
+                                filtered_smi.append(rows["SMILES"])
 
-            filtered_results.drop(columns=columns_to_drop, inplace=True)
+                    filtered_smi_set = set(filtered_smi)
+                    filtered_results = all_passing_mols[~all_passing_mols["SMILES"].isin(filtered_smi_set)]
 
-            filt_results_fpath = f"{tmp_dir}filtered_results_batch_{i+1}.csv.gz"
-            filtered_results.to_csv(filt_results_fpath, index="ID", compression="gzip")
-            self.filt_fpath_ls.append(filt_results_fpath)
+                else:
+                    filtered_results = df
+            
+                filtered_results = filtered_results.drop(columns=['Mol'])
+                filtered_chunks.append(filtered_results)
+
+                full_filtered_df = pd.concat(filtered_chunks)
+
+                filt_results_fpath = f"{save_dir}{rdkit_or_mordred}_filtered_results_batch_{i+1}.csv.gz"
+                full_filtered_df.to_csv(filt_results_fpath, index="ID", compression="gzip")
+                self.filt_fpath_ls.append(filt_results_fpath)
 
         return self.filt_fpath_ls
 
@@ -945,7 +1033,9 @@ class Dataset_Formatter:
         full_save_path: str = None,
         desc_save_path: str = None,
         filename: str = None,
-        index_suffix: str = "HW",
+        index_prefix: str = "HW",
+        filt_fpath_ls: list = [],
+
     ):
         """
         Description
@@ -959,49 +1049,60 @@ class Dataset_Formatter:
         save_data (bool)        Flag to save the chunks
         save_path (str)         Path to save the chunks to
         filename (str)          Name to save chunks as, function will number them for you
+        index_prefix (str)      Prefix to set new index with
+        filt_fpath_ls (list)    List of pre-filtered csv fpaths to make into final chunks
 
         Returns
         -------
         1: List of pathways to the full filtered files
         2: List of pathways to the filtered descriptor files
         """
+        print("\n=======================\nMaking Final Chunks\n=======================\n")
+
+        if filt_fpath_ls:
+            self.filt_fpath_ls = filt_fpath_ls
 
         not_full_df = pd.DataFrame()
         full_fpath_ls = []
         desc_fpath_ls = []
         global_index = 0
+        chunk_counter = 1
 
-        for i, file in enumerate(self.filt_fpath):
+        for file_index, file in enumerate(
+            tqdm(self.filt_fpath_ls, desc='Making final chunks', unit='chunks')
+            ):
             df = pd.read_csv(file, index_col="ID", compression="gzip")
-            concat = pd.concat([df, not_full_df], ignore_indez=True)
+            concat = pd.concat([df, not_full_df], ignore_index=True)
 
-            while len(concat) >= chunksize:
+            while len(concat) > chunksize:
                 full_chunk = concat.iloc[:chunksize]
-                full_chunk.index = range(global_index, global_index + chunksize)
+                full_chunk.index = [f"{index_prefix}-{i+1}" for i in range(global_index, global_index + chunksize)]
                 global_index += chunksize
-                fpath = f"{full_save_path}{filename}_{i+1}.csv.gz"
-                full_chunk.to_csv(fpath, compression="gzip", index="ID")
-                print(f"Written {len(full_chunk)} molecules to {fpath}")
+                fpath = f"{full_save_path}{filename}_{chunk_counter}.csv.gz"
+                full_chunk.to_csv(fpath, compression="gzip", index_label="ID")
+                print(f"\nWritten {len(full_chunk)} molecules to {fpath}")
 
                 full_fpath_ls.append(fpath)
+                chunk_counter += 1
                 concat = concat.iloc[chunksize:].reset_index(drop=True)
 
             not_full_df = concat
 
-        if not_full_df.empty:
-            not_full_df.index = range(global_index, global_index + len(not_full_df))
-            fpath = f"{full_save_path}{filename}_{len(full_fpath_ls+1)}.csv.gz"
+        if not_full_df.shape[0] > 0:
+            not_full_df.index = [f"{index_prefix}-{i+1}" for i in range(global_index, global_index + len(not_full_df))]
+            fpath = f"{full_save_path}{filename}_{chunk_counter}.csv.gz"
             not_full_df.to_csv(fpath, index_label="ID", compression="gzip")
             print(f"Written {len(not_full_df)} molecules to {fpath}")
             full_fpath_ls.append(fpath)
+            chunk_counter += 1
 
-        print(
-            f"Written {len(full_fpath_ls)} files containing full data.\nFilepath:{full_save_path}\nChunksize: {chunksize}."
-        )
+            print(
+                f"\nWritten {len(full_fpath_ls)} files containing full data.\nFilepath:{full_save_path}\nChunksize: {chunksize}.\n"
+            )
 
         if gen_desc_chunks:
             if descriptor_set == "RDKit":
-                columns, fns = zip(*Descriptors.descList)
+                columns, _ = zip(*Descriptors.descList)
             if descriptor_set == "Mordred":
                 calc = Calculator(descriptors, ignore_3D=True)
                 desc_names = [str(desc) for desc in calc.descriptors]
@@ -1011,18 +1112,137 @@ class Dataset_Formatter:
                         columns.append("NumAromaticRings")
                     elif desc == "MW":
                         columns.append("MolWt")
+                    elif desc == "nHBAcc":
+                        columns.append('NumHAcceptors')
+                    elif desc == "nHBDon":
+                        columns.append('NumHDonors')
                     else:
                         columns.append(desc)
 
-        for i, file in enumerate(full_fpath_ls):
-            df = pd.read_csv(file, index_col="ID", compression="gzip")
-            fpath = f"{desc_save_path}{filename}_desc_{i+1}.csv.gz"
-            full_desc = df.loc[:, columns]
-            full_desc.to_csv(fpath, index="ID", compression="gzip")
-            desc_fpath_ls.append(fpath)
-
-        print(
-            f"Written {len(full_fpath_ls)} files containing descriptor data.\nFilepath:{desc_save_path}\nChunksize: {chunksize}."
-        )
+            for i, file in enumerate(full_fpath_ls):
+                df = pd.read_csv(file, index_col="ID", compression="gzip")
+                full_desc = df.loc[:, columns]
+                fpath = f"{desc_save_path}{filename}_desc_{i+1}.csv.gz"
+                full_desc.to_csv(fpath, index_label="ID", compression="gzip")
+                desc_fpath_ls.append(fpath)
+            print(
+                f"Written {len(desc_fpath_ls)} files containing descriptor data.\nFilepath:{desc_save_path}\nChunksize: {chunksize}."
+            )
 
         return full_fpath_ls, desc_fpath_ls
+
+class Dataset_Accessor:
+    def __init__(
+        self,
+        original_path: str,
+        temp_suffix: str = ".tmp",
+        wait_time: int = 30,
+        max_wait: int = 21600,
+    ):
+
+        self.original_path = Path(original_path)
+        self.temp_path = self.original_path.with_suffix(
+            temp_suffix + self.original_path.suffix
+        )
+        self.wait_time = wait_time
+        self.max_wait = max_wait
+
+    def get_exclusive_access(
+        self,
+        original_path: str = None,
+        temp_path: str = None,
+        wait_time: int = None,
+        max_wait: int = 21600,
+    ):
+        """
+        Description
+        -----------
+        Function to gain exclusing access to a file
+        
+        Parameters
+        ----------
+        original_path (str)     File name and its pathway
+        temp_path (str)         Name of the temporary path you want to name the file as for exclusive access
+        wait_time (int)         Time in between attempts for access to file in seconds
+        max_wait (int)          Maximum time the file will wait to gain access in seconds (default is 6 hours)
+        """
+
+        if original_path is None:
+            original_path = self.original_path
+        if temp_path is None:
+            temp_path = self.temp_path
+        if wait_time is None:
+            wait_time = self.wait_time
+
+        waited = 0
+        while True:
+            try:
+                original_path.rename(temp_path)
+                return str(temp_path)
+
+            except FileNotFoundError:
+                print(
+                    f'File "{original_path.stem} is in use.\nRetrying in {wait_time} seconds...'
+                )
+
+            except Exception as e:
+                print(
+                    f"An error occurred while renaming {original_path.stem} for exclusive access:\n{e}"
+                )
+                return None
+
+            time.sleep(wait_time)
+            waited += wait_time
+            if waited > max_wait:
+                print(f"Reached maximum waiting time on file:\n{original_path.stem}")
+                return None
+
+    def release_file(self, original_path: str = None, temp_path: str = None):
+
+        if original_path is None:
+            original_path = self.original_path
+        if temp_path is None:
+            temp_path = self.temp_path
+
+        try:
+            temp_path.rename(original_path)
+            print(f"File {temp_path.stem} renamed back to {original_path.stem}")
+        except Exception as e:
+            print(
+                f"An error occurred while renaming {temp_path.stem} back to {original_path.stem}:\n{e}"
+            )
+
+    def edit_df(
+        self,
+        column_to_edit: str,
+        df: pd.DataFrame = None,
+        df_path: str = None,
+        index_col: str = "ID",
+        idxs_to_edit: list = None,
+        vals_to_enter: list = None,
+        data_dict: dict = None,
+    ):
+
+        if df is not None:
+            self.df = df
+
+        if df_path is None:
+            df_path = self.temp_path
+
+        if df is None:
+            self.df = pd.read_csv(df_path, index_col=index_col)
+
+        if idxs_to_edit is not None and vals_to_enter is not None:
+            for idx, val in zip(idxs_to_edit, vals_to_enter):
+                self.df.loc[idx, column_to_edit] = str(val)
+
+        elif data_dict is not None:
+            for idx, val in data_dict.items():
+                self.df.loc[idx, column_to_edit] = str(val)
+
+        else:
+            raise ValueError(
+                "Either data_dict, idx_to_edit, or vals_to_enter were not entered"
+            )
+
+        self.df.to_csv(df_path, index_label=index_col)

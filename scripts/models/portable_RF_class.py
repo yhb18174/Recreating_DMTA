@@ -7,6 +7,7 @@ from sklearn.model_selection import (
     train_test_split,
 )
 from sklearn.datasets import make_regression
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
 import joblib
@@ -17,6 +18,7 @@ import seaborn as sns
 import pickle as pk
 from tqdm import tqdm
 import json
+import math
 import time
 
 
@@ -75,7 +77,7 @@ class RF_model:
                                         3. Mean Squared Error
                                         4. Root Mean Squared Error (computed from SDEP and Bias)
                                         5. Pearson R coefficient
-                                        6. Spearman R coefficient
+     \                                   6. Spearman R coefficient
                                         7. r2 score
 
         """
@@ -83,16 +85,19 @@ class RF_model:
         predictions = best_rf.predict(feature_test)
 
         # Calculate Errors
-        errors = target_test - predictions
+        true = target_test.astype(float)
+        pred = predictions.astype(float)
+        errors = true - pred
+
 
         # Calculate performance metrics
         bias = np.mean(errors)
-        sdep = np.std(errors)
-        mse = mean_squared_error(target_test, predictions)
-        rmsd = np.sqrt(mse)
-        r2 = r2_score(target_test, predictions)
+        sdep = (np.mean((true-pred-(np.mean(true-pred)))**2))**0.5
+        mse = mean_squared_error(true, pred)
+        rmse = mse**0.5
+        r2 = r2_score(true, pred)
 
-        return bias, sdep, mse, rmsd, r2
+        return bias, sdep, mse, rmse, r2
 
     def _plot_feature_importance(
         self,
@@ -142,6 +147,17 @@ class RF_model:
 
         return
 
+    def _calc_mpo(self,
+                  full_data_fpath,
+                  preds_df,
+                  preds_col_name
+                  ):
+        df = pd.read_csv(full_data_fpath, index_col='ID', usecols=['ID', 'PFI', 'oe_logp'])
+        df[preds_col_name] = preds_df[preds_col_name]
+        df['MPO'] = [-score * 1/(1 + math.exp(PFI -8)) for score, PFI in zip(preds_df[preds_col_name], df['PFI'])]
+    
+        return df
+
     def Predict(
         self,
         feats: pd.DataFrame,
@@ -150,6 +166,8 @@ class RF_model:
         preds_filename: str = None,
         final_rf: str = None,
         pred_col_name: str = "affinity_pred",
+        calc_mpo: bool=True,
+        full_data_fpath: str=None
     ):
         """
         Descripton
@@ -171,8 +189,7 @@ class RF_model:
         """
 
         if final_rf is not None:
-            with open(final_rf, "rb") as f:
-                rf_model = pk.load(f)
+            rf_model = joblib.load(final_rf)
         else:
             rf_model = self.final_rf
 
@@ -183,6 +200,13 @@ class RF_model:
         all_tree_preds = np.stack(
             [tree.predict(feats) for tree in rf_model.estimators_]
         )
+
+        if calc_mpo:
+            preds_df = self._calc_mpo(full_data_fpath,
+                                      preds_df=preds_df,
+                                      preds_col_name=pred_col_name
+                                      )
+            
         preds_df["Uncertainty"] = np.std(all_tree_preds, axis=0)
 
         if save_preds:
@@ -202,6 +226,7 @@ class RF_model:
         test_size: float,
         save_interval_models: bool,
         save_path: str,
+        hyper_params: dict
     ):
         """
         Description
@@ -224,24 +249,47 @@ class RF_model:
         3: Feature importances from each RF
         """
 
-        search = self.search
         rng = rand.randint(0, 2**31)
 
         print(f"Performing resample {n + 1}")
+        resample_number = n + 1
 
         feat_tr, feat_te, tar_tr, tar_te = train_test_split(
             features, targets, test_size=test_size, random_state=rng
         )
 
         # Convert DataFrames to NumPy arrays if necessary
-        if isinstance(tar_tr, pd.DataFrame):
-            tar_tr = tar_tr.to_numpy().ravel()
-        if isinstance(tar_te, pd.DataFrame):
-            tar_te = tar_te.to_numpy().ravel()
+        tar_tr = tar_tr.values.ravel() if isinstance(tar_tr, pd.DataFrame) else tar_tr
+        tar_te = tar_te.values.ravel() if isinstance(tar_te, pd.DataFrame) else tar_te
+
+        # Reinitialize the model and cross validation
+        rf = Pipeline([
+            ('rf', RandomForestRegressor())
+        ])
+        
+        self._set_inner_cv(cv_type=self.inner_cv_type, n_splits=self.n_splits)
+
+        if self.search_type == "grid":
+            search = GridSearchCV(
+                estimator=rf,
+                param_grid=hyper_params,
+                cv=self.inner_cv,
+                scoring=self.scoring,
+            )
+        else:
+            search = RandomizedSearchCV(
+                estimator=rf,
+                param_distributions=hyper_params,
+                n_iter=self.n_resamples,
+                cv=self.inner_cv,
+                scoring=self.scoring,
+                random_state=rand.randint(0, 2**31),
+            )
 
         search.fit(feat_tr, tar_tr)
 
-        best_rf = search.best_estimator_
+        best_pipeline = search.best_estimator_
+        best_rf = best_pipeline.named_steps['rf']
 
         performance = self._calculate_performance(
             target_test=tar_te, feature_test=feat_te, best_rf=best_rf
@@ -250,17 +298,16 @@ class RF_model:
         if save_interval_models:
             joblib.dump(best_rf, f"{save_path}{n}.pkl")
 
-        return search.best_params_, performance, best_rf.feature_importances_
+        return search.best_params_, performance, best_rf.feature_importances_, resample_number
 
     def Train_Regressor(
         self,
         search_type: str,
-        scoring: str,
-        n_resamples: int = 10,
+        scoring: str = 'neg_mean_squared_error',
+        n_resamples: int = 50,
         inner_cv_type: str = "kfold",
         n_splits: int = 5,
         test_size: float = 0.3,
-        test: bool = False,
         hyper_params: dict = None,
         features: pd.DataFrame = None,
         targets: pd.DataFrame = None,
@@ -268,6 +315,7 @@ class RF_model:
         save_path: str = None,
         save_final_model: bool = False,
         plot_feat_importance: bool = False,
+        batch_size: int=2
     ):
         """
         Description
@@ -284,7 +332,6 @@ class RF_model:
         inner_cv_type (str)             Setting the inner Cross-Validation method
         n_splits (int)                  Number of splits in the inner Cross-Validation
         test_size (float)               Decimal fort he train/test split. 0.3 = 70/30
-        test (bool)                     Flag to test the function on a much smaller sample of data
         hyper_params (dict)             Dictionary of hyperparameters to optimise on
         features (pd.DataFrame)         Features to train the model on
         targets (pd.DataFrame)          Targets to train the model on
@@ -300,82 +347,46 @@ class RF_model:
         3: Dictionary of performance metrics
         4: Dataframe of feature importances
         """
+        
+        self.inner_cv_type = inner_cv_type
+        self.n_splits = n_splits
+        self.search_type = search_type
+        self.scoring = scoring
+        self.n_resamples = n_resamples
 
-        if test:
-            hyper_params = {
-                "n_estimators": [20, 51],
-                "max_features": ["sqrt"],
-                "max_depth": [10, 20],
-                "min_samples_split": [2, 5],
-                "min_samples_leaf": [1],
-            }
-            features, targets = make_regression(
-                n_samples=1000, n_features=20, noise=0.5
-            )
-            feature_names = [f"Feature {i}" for i in range(features.shape[1])]
-            features = pd.DataFrame(features, columns=feature_names)
-        else:
-            feature_names = features.columns.tolist()
+        def process_batch(batch_indices):
+            results_batch = []
+            for n in batch_indices:
+                result = self._fit_model_and_evaluate(
+                    n, features, targets, test_size, save_interval_models, save_path, hyper_params
+                )
+                results_batch.append(result)
+            return results_batch
 
-        self.rf = RandomForestRegressor()
+        n_batches = (n_resamples + batch_size - 1) // batch_size
+        batches = [range(i * batch_size, min((i + 1) * batch_size, n_resamples)) for i in range(n_batches)]
+        results_batches = Parallel(n_jobs=-1)(delayed(process_batch)(batch) for batch in batches)
+        results = [result for batch in results_batches for result in batch]
 
-        self._set_inner_cv(cv_type=inner_cv_type, n_splits=n_splits)
-
-        if search_type == "grid":
-            self.search = GridSearchCV(
-                estimator=self.rf,
-                param_grid=hyper_params,
-                cv=self.inner_cv,
-                scoring=scoring,
-            )
-        else:
-            self.search = RandomizedSearchCV(
-                estimator=self.rf,
-                param_distributions=hyper_params,
-                n_iter=n_resamples,
-                cv=self.inner_cv,
-                scoring=scoring,
-                random_state=rand.randint(0, 2**31),
-            )
-
-        results = []
-        # Sequentially process each task without multiprocessing
-        for n in tqdm(range(n_resamples), desc="Resamples submitted"):
-            result = self._fit_model_and_evaluate(
-                n, features, targets, test_size, save_interval_models, save_path
-            )
-            results.append(result)
-
-        # Attempt of Parallelisation
-        # with Parallel(n_jobs=-1, batch_size=5) as parallel:
-        #     results = parallel(
-        #                         delayed(self._fit_model_and_evaluate)(
-        #                         n, features, targets, test_size, save_interval_models, save_path
-        #                         ) for n in  tqdm(range(n_resamples), desc="Resamples submitted")
-        #     )
-
-        print("Resamples completed.")
-
-        best_params_ls, performance_ls, feat_importance_ls = zip(*results)
+        best_params_ls, self.performance_list, feat_importance_ls, self.resample_number_ls = zip(*results)
 
         self.best_params_df = pd.DataFrame(best_params_ls)
         best_params = self.best_params_df.mode().iloc[0].to_dict()
         for key, value in best_params.items():
-            if key != "max_features":
+            if key != "rf__max_features":
                 best_params[key] = int(value)
 
-        # Calculating overall performance metric averages
-        performance_dict = {
-            "Bias": round(float(np.mean([perf[0] for perf in performance_ls])), 2),
-            "SDEP": round(float(np.mean([perf[1] for perf in performance_ls])), 2),
-            "RMSE": round(float(np.mean([perf[2] for perf in performance_ls])), 2),
-            "MSE": round(float(np.mean([perf[3] for perf in performance_ls])), 2),
-            "r2": round(float(np.mean([perf[4] for perf in performance_ls])), 2),
+        self.performance_dict = {
+            "Bias": round(float(np.mean([perf[0] for perf in self.performance_list])), 4),
+            "SDEP": round(float(np.mean([perf[1] for perf in self.performance_list])), 4),
+            "MSE": round(float(np.mean([perf[2] for perf in self.performance_list])), 4),
+            "RMSE": round(float(np.mean([perf[3] for perf in self.performance_list])), 4),
+            "r2": round(float(np.mean([perf[4] for perf in self.performance_list])), 4),
         }
 
         avg_feat_importance = np.mean(feat_importance_ls, axis=0)
         feat_importance_df = pd.DataFrame(
-            {"Feature": feature_names, "Importance": avg_feat_importance}
+            {"Feature": features.columns.tolist(), "Importance": avg_feat_importance}
         ).sort_values(by="Importance", ascending=False)
         if plot_feat_importance:
             print("Plotting feature importance")
@@ -386,19 +397,42 @@ class RF_model:
                 filename="feature_importance_plot",
             )
 
-        # Training new model on the best parameters
-        self.final_rf = RandomForestRegressor(**best_params)
-        self.final_rf.fit(features, targets.ravel())
+        cleaned_best_params = {key.split('__')[1]: value for key, value in best_params.items()}
 
-        # Saving the best model
+        self.final_rf = RandomForestRegressor(**cleaned_best_params)
+        self.final_rf.fit(features, targets.to_numpy())
+
         if save_final_model:
             print(f"Saving final model to:\n{save_path}/final_model.pkl")
             joblib.dump(self.final_rf, f"{save_path}/final_model.pkl")
 
             with open(f"{save_path}/performance_stats.json", "w") as file:
-                json.dump(performance_dict, file)
+                json.dump(self.performance_dict, file)
 
             with open(f"{save_path}/best_params.json", "w") as file:
                 json.dump(best_params, file)
+            
+            features.to_csv(f'{save_path}/training_data/training_features.csv.gz', index_label='ID', compression='gzip')
+            targets.to_csv(f'{save_path}/training_data/training_targets.csv.gz', index_label='ID', compression='gzip')
 
-        return self.final_rf, best_params, performance_dict, feat_importance_df
+        return self.final_rf, best_params, self.performance_dict, feat_importance_df
+
+    def _check_for_data_leakage(self):
+        mse_list = [perf[2] for perf in self.performance_list]
+        
+        # Prepare data for seaborn
+        data = pd.DataFrame({
+            'Resample Number': self.resample_number_ls,
+            'MSE': mse_list
+        })
+
+        # Create the scatter plot
+        plt.figure(figsize=(8,6))
+        sns.scatterplot(data=data, x='Resample Number', y='MSE', marker='o', color='blue')
+        
+        plt.title('Data Leakage Plot')
+        plt.xlabel('Resample Number')
+        plt.ylabel('MSE')
+        plt.grid(True)
+        
+        plt.show()
