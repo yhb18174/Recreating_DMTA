@@ -2,6 +2,9 @@ import pandas as pd
 from pathlib import Path
 import sys
 from rdkit import RDLogger
+from glob import glob
+from tqdm import tqdm
+import re
 
 lg = RDLogger.logger()
 lg.setLevel(RDLogger.CRITICAL)
@@ -10,17 +13,17 @@ FILE_DIR = str(Path(__file__).parent)
 PARENT_DIR = str(Path(__file__).parent.parent)
 
 sys.path.insert(0, PARENT_DIR)
-from dataset_fns import Dataset_Formatter, mp_Dataset_Formatter
+from dataset_functions import Dataset_Formatter
 
 make_training_data=False
 make_full_data = True
-chunksize = 200000
+chunksize = 100000
 
 
 # MAKING TRAINING DATA SET
 if make_training_data:
     print('Generating ChEMBL Data set')
-    mk = mp_Dataset_Formatter()
+    mk = Dataset_Formatter()
 
     data = mk._load_data(mol_dir='/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/',
                         filename='raw_ChEMBL_data.csv',
@@ -111,70 +114,101 @@ if make_training_data:
 # MAKING EXPERIMENT DATA SET
 if make_full_data:
     mol_dir = '/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/raw/'
-    filename = 'exp_8M.inchi'
+    filename = 'exp_all.inchi'
     chunksize = 100000
     retain_ids = False
     desc_filepath = '/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/desc/'
     docking_dir = '/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/docking/'
+    temp_fpath = '/users/yhb18174/Recreating_DMTA/datasets/temp/'
+    save_dir = '~/Recreating_DMTA/datasets/temp/full_data/mordred/filtered_results/'
+
+    # premade_chunks = glob(f'/users/yhb18174/Recreating_DMTA/datasets/temp/temp_*.csv.gz')
 
 
-    mk = mp_Dataset_Formatter()
+    mk = Dataset_Formatter()
 
-    print('Loading full data from:\nexp_all.inchi')
+    # print('Loading full data:\n')
 
-    data = mk._load_data(mol_dir=mol_dir,
-                         filename=filename,
-                         pymolgen=True,
-                         prefix='PMG-',
-                         mol_type='smiles',
-                         chunksize=chunksize,
-                         retain_ids=retain_ids)
+    # data = mk.LoadData(mol_dir=mol_dir,
+    #                      filename=filename,
+    #                      pymolgen=True,
+    #                      prefix='PMG-',
+    #                      mol_type='smiles',
+    #                      chunksize=chunksize,
+    #                      retain_ids=retain_ids,
+    #                      temp_files=premade_chunks,
+    #                      save_path=temp_fpath,
+    #                      remove_temp_files=False)
     
-    print('Generating RDKit descriptors')
+    # temp_df_ls = glob(f'{desc_filepath}PyMolGen*')
+
+    # desc_fpath_ls, full_fpath_ls = mk.CalcDescriptors(descriptor_set = 'RDKit', csv_list=temp_df_ls, tmp_dir = temp_fpath)
     
-    desc_chunks, full_chunks = mk._calculate_desc_df(descriptor_set='RDKit')
+    # print('Filtering DF')
 
-    print('Filtering DF')
+    # full_fpath_ls = glob(f'{temp_fpath}RDKit_full_batch_*.csv.gz')
 
-    filt_df = mk._filter_df()
+    # filt_df = mk.FilterMols(full_fpath_ls=full_fpath_ls, save_dir=save_dir, rdkit_or_mordred='RDKit')
 
-    print('Making Final Chunks')
+    # print('Making Final Chunks')
 
-    full, desc = mk._make_final_chunks(chunksize=chunksize,
-                                       gen_desc_chunks=True,
-                                       descriptor_set='RDKit',
-                                       save_full_data=False,
-                                       save_desc_data=True,
-                                       full_save_path=None,
-                                       desc_save_path=desc_filepath + 'rdkit/',
-                                       filename='pymolgen_rdkit_batch')
+    # filt_fpath_ls = glob(f'/users/yhb18174/Recreating_DMTA/datasets/temp/full_data/rdkit/filtered_results/RDKit_filtered_results_batch_*.csv.gz')
+
+
+    # full, desc = mk.MakeFinalChunks(chunksize=chunksize,
+    #                                    gen_desc_chunks=True,
+    #                                    descriptor_set='RDKit',
+    #                                    full_save_path=desc_filepath + 'rdkit/full_data/',
+    #                                    desc_save_path=desc_filepath + 'rdkit/',
+    #                                    filename='PMG_rdkit',
+    #                                    filt_fpath_ls = filt_fpath_ls,
+    #                                    index_prefix='PMG')
     
 
-    for i, chunks in enumerate(full):
+
+    file_paths = glob(f'{desc_filepath}rdkit/full_data/PMG_rdkit_*.csv')
+
+    def extract_number(filename):
+        """
+        Extracts a number from a filename based on a specific pattern.
+        """
+        match = re.search(r'_(\d+)\.csv', filename)
+        return int(match.group(1)) if match else float('inf')
+    
+    def sort_files_by_number(file_paths):
+        """
+        Sorts file paths based on the numerical suffix in the filename.
+        """
+        return sorted(file_paths, key=extract_number)
+    
+    sorted_file_paths = sort_files_by_number(file_paths)
+    print(sorted_file_paths)
+
+    for i, chunks in enumerate(
+        tqdm(sorted_file_paths, desc='Docking files', unit='chunks')):
+        chunks = pd.read_csv(chunks, index_col='ID')
         py_docking_df = pd.DataFrame()
+        py_docking_df.index = chunks.index
         py_docking_df['SMILES'] = chunks['SMILES']
-        py_docking_df['affinity_dock'] = 'N/A'
-        py_docking_df['docking_time'] = 'N/A'
-        py_docking_df.to_csv(f'{docking_dir}pymolgen_batch{i+1}.csv.gz',
-                             index='ID', compression='gzip')
-    
-    print('Generating Mordred descriptors')
+        #py_docking_df['CNN_affinity'] = 'N/A'
+        py_docking_df['Affinity(kcal/mol)'] = 'N/A'
+        py_docking_df.to_csv(f'{docking_dir}PMG_docking_{i+1}.csv',
+                            index_label='ID')
 
-    desc_chunks, full_chunks = mk._calculate_desc_df(descriptor_set='Mordred')
+    # print('Generating Mordred descriptors')
 
-    print('Filtering DF')
+    # temp_df_ls = glob(f'{desc_filepath}PyMolGen*')
 
-    filt_df = mk._filter_df()
+    # desc_chunks, full_chunks = mk.CalcDescriptors(descriptor_set='Mordred', csv_list=temp_df_ls, tmp_dir=temp_fpath)
 
-    print('Making Final Chunks')
+    # print('Filtering chunks')
 
-    full, desc = mk._make_final_chunks(chunksize=chunksize,
-                                       gen_desc_chunks=True,
-                                       descriptor_set='Mordred',
-                                       save_full_data=False,
-                                       save_desc_data=True,
-                                       full_save_path=None,
-                                       desc_save_path=desc_filepath+ 'mordred/',
-                                       filename='pymolgen_mordred_batch')
-
-
+    # filt_fpath_ls = glob(f'/users/yhb18174/Recreating_DMTA/datasets/temp/full_data/mordred/filtered_results/Mordred*.csv.gz')
+    # full, desc = mk.MakeFinalChunks(chunksize=chunksize,
+    #                                    gen_desc_chunks=True,
+    #                                    descriptor_set='Mordred',
+    #                                    full_save_path=desc_filepath + 'rdkit/full_data/',
+    #                                    desc_save_path=desc_filepath + 'rdkit/',
+    #                                    filename='PMG_rdkit',
+    #                                    filt_fpath_ls = filt_fpath_ls,
+    #                                    index_prefix='PMG')

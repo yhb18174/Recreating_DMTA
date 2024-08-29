@@ -1,6 +1,7 @@
 import pandas as pd
 import sys
 from rdkit import Chem
+from rdkit.Chem import AllChem
 import re
 from pathlib import Path
 import subprocess
@@ -31,8 +32,7 @@ def WaitForDocking(
 ):
     while True:
         dock_df = pd.read_csv(dock_csv, index_col='ID', dtype=str)
-        df_with_idx = dock_df[dock_df.index.isin(idxs_in_batch)]
-        pending_docking = df_with_idx[df_with_idx[scores_col] == 'PD']
+        pending_docking = dock_df[dock_df[scores_col] == 'PD']
 
         if pending_docking.empty:
             print('All docking scores present')
@@ -65,7 +65,6 @@ class Run_GNINA:
         molid_ls: list,
         smi_ls: list,
         receptor_path: str,
-        max_confs: int=1000,
         center_x: float = 14.66,
         center_y: float = 3.41,
         center_z: float = 10.47,
@@ -77,7 +76,7 @@ class Run_GNINA:
         cpu: int = 1,
         addH: int = 0,
         stripH: int = 1,
-        seed: int = rand.randint(0, 2**31),
+        seed: int = 19,
         cnn_scoring: str = "rescore",
         gnina_path: str = f"{PROJ_DIR}/scripts/docking/gnina",
         env_name: str = "phd_env",
@@ -114,7 +113,6 @@ class Run_GNINA:
         -------
         Initialised class
         """
-        print(f"Random Seed:\n{seed}")
 
         self.tar_mol_dir_path_ls = [f"{docking_dir}{molid}.tar.gz" for molid in molid_ls]
         self.mol_dir_path_ls = [f"{docking_dir}{molid}/" for molid in molid_ls]
@@ -129,7 +127,6 @@ class Run_GNINA:
         self.smi_ls = smi_ls
         self.molid_ls = molid_ls
         self.receptor_path = receptor_path
-        self.max_confs = max_confs
         self.center_x = center_x
         self.center_y = center_y
         self.center_z = center_z
@@ -146,7 +143,7 @@ class Run_GNINA:
         self.gnina_path = gnina_path
         self.env_name = env_name
 
-    def _mol_enhance(self, smi: str, sdf_fpath: str, num_confs: int=10):
+    def _mol_enhance_non_opt(self, smi: str, sdf_fpath: str, num_confs: int=10):
         """
         Description
         -----------
@@ -164,13 +161,28 @@ class Run_GNINA:
         with open(sdf_fpath, "w") as file:
             file.write(Chem.MolToMolBlock(h_mol))
 
+    def _mol_enhance(self, smi: str, sdf_fpath: str, num_confs: int=10):
+
+        mol=oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        oechem.OEAddExplicitHydrogens(mol)
+
+        omega = oeomega.OEOmega()
+        omega.SetMaxConfs(num_confs)
+
+        print(f"Number of conformers generated: {mol.NumConfs()}")
+
+        with oechem.oemolostream(sdf_fpath) as ofs:
+            oechem.OEWriteMolecules(ofs, mol)
+
+
     def _mol_prep(self, smi: str, molid: str, mol_dir: str):
         """
         Description
         -----------
-        Prepare molecule by generating 3D coordinates, calculating ionisation state 
-        at pH 7.4 and saving an image of the molecule.
-            Parameters
+        Prepares the SMILES string under pH 7.4 conditions
+
+        Parameters
         ----------
         smi (str)           SMILES string of molecule to set to pH 7.4
         molid (str)         ID of molecule to save .sdf file as
@@ -181,10 +193,16 @@ class Run_GNINA:
         Pathway to converted .sdf file
         """
 
-        lig_sdf_path = Path(mol_dir) / f"{molid}.sdf"
-        pH74_path = Path(mol_dir) / f"{molid}_pH74.sdf"
+        lig_sdf_path = mol_dir + molid + ".sdf"
 
-        self._mol_enhance(smi, str(lig_sdf_path))
+        # Convert file paths to Path objects
+        ligand_sdf_path = Path(lig_sdf_path)
+        before_pH_adjustment_path = ligand_sdf_path.with_name(
+            ligand_sdf_path.stem + "_before_pH_adjustment.sdf"
+        )
+        pH74_path = ligand_sdf_path.with_name(ligand_sdf_path.stem + "_pH74.sdf")
+
+        self._mol_enhance(smi, lig_sdf_path)
 
         try:
             ifs = oechem.oemolistream()
@@ -203,12 +221,15 @@ class Run_GNINA:
             ifs.close()
             ofs.close()
 
-            return str(pH74_path)
+            # Rename files using Path methods
+            ligand_sdf_path.rename(before_pH_adjustment_path)
+            pH74_path.rename(ligand_sdf_path)
 
         except Exception as e:
             print(f"Failed to convert mol to pH 7.4 for the following reason:\n{e}")
-            return None
-        
+
+        return pH74_path
+
     def _make_ph74_sdfs(self):
         """
         Description
@@ -237,150 +258,6 @@ class Run_GNINA:
             else:
                 path = self._mol_prep(smi=smi, molid=molid, mol_dir=molid_dir)
                 self.sdf_path_ls.append(str(path))
-
-        return self.sdf_path_ls
-    
-    def nonallowed_fragment_tautomers(self, molecule):
-
-        fragment_list = ["N=CO",
-                        "C=NCO",
-                        "C(O)=NC",
-                        "c=N",
-                        "N=c",
-                        "C=n",
-                        "n=C"]
-                        
-        for fragment in fragment_list:
-            fragment_search = oechem.OESubSearch(fragment)
-            oechem.OEPrepareSearch(molecule, fragment_search)
-            if fragment_search.SingleMatch(molecule):
-                return False
-                break
-        
-        return True
-        
-    def _generate_conformers(self, sdf_fpath: str):
-        lig_in_fname = Path(sdf_fpath).name
-        lig_in_fpath = Path(sdf_fpath).parent
-        lig_out_fpath = str(lig_in_fpath) + '/all_confs_' + str(lig_in_fname)
-        ligand_prefix = str(lig_in_fname)[:-4]
-
-        omega_opts = oeomega.OEOmegaOptions()
-        omega_opts.SetEnergyWindow(20)
-        omega_opts.SetMaxSearchTime(600)
-        omega_opts.SetSearchForceField(7)
-        omega_opts.SetRMSThreshold(0.5)
-        omega_opts.SetMaxConfs(self.max_confs)
-        omega_opts.SetTorsionDrive(True)
-        omega_opts.SetStrictStereo(False)
-
-        omega = oeomega.OEOmega(omega_opts)
-
-        ifs = oechem.oemolistream()
-        ifs.open(sdf_fpath)
-
-        ofs_sdf = oechem.oemolostream()
-        ofs_sdf.SetFormat(oechem.OEFormat_SDF)
-        ofs_sdf.open(lig_out_fpath)
-
-
-        # Output Conformers in a mol2 file for showing in VMD
-
-        ofs_mol2 = oechem.oemolostream()
-        ofs_mol2.SetFormat(oechem.OEFormat_MOL2)
-        ofs_mol2.open(lig_out_fpath[:-4] + '.mol2')
-
-        conf_isomer_ids = open(lig_out_fpath[:-4]+'_conf_isomers.dat', 'w')
-        conf_isomer_ids.write('conf_n,tauto,enant\n')
-
-        tautomer_opts = oequacpac.OETautomerOptions()
-        tautomer_opts.SetMaxSearchTime(300)
-        tautomer_opts.SetRankTautomers(True)
-         # SetCarbonHybridization = False stops sp2-sp3 changes in tautomer enumeration
-        # tautomer_opts.SetCarbonHybridization(False)
-        tautomer_opts.SetCarbonHybridization(False)
-
-        # enantiomer options
-        flipper_opts = oeomega.OEFlipperOptions()
-        flipper_opts.SetMaxCenters(12)
-        flipper_opts.SetEnumSpecifiedStereo(False) # Changed to False to preserve defined stereochemistry
-        flipper_opts.SetEnumNitrogen(True)
-        flipper_opts.SetWarts(False)
-
-        # generate tautomers, enantiomers and conformers
-        # Record number of tautomers, enantiomers, disallowed isomers
-        n_tauto = 0
-        n_enant = []
-        n_confs = []
-        n_disallowed = 0
-        conf_i = 1
-
-        for mol in ifs.GetOEMols():
-            for tautomer in oequacpac.OEEnumerateTautomers(mol, tautomer_opts):
-                n_tauto += 1
-                n_enant.append(0)
-                n_confs.append([])
-
-                for enantiomer in oeomega.OEFlipper(tautomer, flipper_opts):
-                    n_enant[-1] += 1
-                    ligand = oechem.OEMol(enantiomer)
-                    ligand.SetTitle(ligand_prefix)
-
-                if self.nonallowed_fragment_tautomers(ligand):
-                    ret_code = omega.Build(ligand)
-                    if ret_code == oeomega.OEOmegaReturnCode_Success:
-                        n_confs[-1].append(ligand.NumConfs())
-                        # Add SD data to indicate tautomer/enantiomer number:
-                        oechem.OESetSDData(ligand, 'tautomer_n', str(n_tauto))
-                        oechem.OESetSDData(ligand, 'isomer_n', str(n_enant[-1]))
-                        oechem.OEWriteMolecule(ofs_sdf, ligand)
-                        oechem.OEWriteMolecule(ofs_mol2, ligand)
-                        conf_i += 1
-                else:
-                    n_disallowed += 1
-        conf_isomer_ids.close()
-
-        with open(str(lig_in_fpath)+'/conf_gen.log', 'w') as log:
-            log.write(f'Conformer generation: tautomers: {n_tauto}\n')
-            log.write(f'                      enantiomers: {n_enant}\n')
-            log.write(f'                      number disallowed: {n_disallowed}\n')
-            log.write(f'                      final number: {sum(n_enant) - n_disallowed}\n')
-            log.write(f'                      number of individual 3D conformers: {n_confs}\n')
-
-        ifs.close()
-        ofs_sdf.close()
-        ofs_mol2.close()
-
-        return str(lig_out_fpath)
-    
-    def _process_mol_wrapper(self, molid_dir, smi, molid):
-        mol_dir_path = Path(molid_dir)
-
-        if mol_dir_path.suffixes == ['.tar', '.gz']:
-            subprocess.run(["tar", "-xzf", molid_dir], check=True)
-
-        non_conf_path = self._mol_prep(smi=smi, molid=molid, mol_dir=molid_dir)
-        conf_path = self._generate_conformers(non_conf_path)
-
-        return conf_path    
-
-    def ProcessMols(self, use_multiprocessing):
-
-        self.sdf_path_ls = []
-        if use_multiprocessing:
-            with Pool() as pool:
-                results = pool.starmap(
-                    self._process_mol_wrapper, zip(self.mol_dir_path_ls,
-                                                   self.smi_ls,
-                                                   self.molid_ls)
-                    )
-            self.sdf_path_ls.extend(results)
-
-        else:
-            for molid_dir, smi, molid in zip(
-                self.mol_dir_path_ls, self.smi_ls, self.molid_ls
-            ):
-                self.sdf_path_ls.append(self._process_mol_wrapper(molid_dir, smi, molid))
 
         return self.sdf_path_ls
 
@@ -423,13 +300,11 @@ class Run_GNINA:
     def _create_submit_script(
         self,
         molid: str,
-        run_hrs: int,
+        max_time: int,
         mol_dir: str,
         sdf_filename: str,
         output_filename: str,
         log_filename: str,
-        run_mins: int=0
-
     ):
         """
         Description
@@ -439,7 +314,7 @@ class Run_GNINA:
         Parameters
         ----------
         molid (str)             ID of the molecule to dock
-        run_hrs (int)          Maximum time which the docking can run for (has to be a whole number between 1 and 168)
+        max_time (int)          Maximum time which the docking can run for (has to be a whole number between 1 and 168)
         mol_dir (str)           Pathway to the molecule docking directory
         sdf_filename (str)      Filename and path to the .sdf file to dock
         output_filename (str)   Name to save the output .sdf under
@@ -453,7 +328,7 @@ class Run_GNINA:
         gnina_script = f"""\
 #!/bin/bash
 #SBATCH --export=ALL
-#SBATCH --time {run_hrs}:{run_mins}:00
+#SBATCH --time {max_time}:00:00
 #SBATCH --job-name=dock_{molid}
 #SBATCH --ntasks={self.num_cpu}
 #SBATCH --partition=standard
@@ -523,7 +398,7 @@ fi
             print(f"Error in submitting job: {e}")
             return None
 
-    def SubmitJobs(self, run_hrs: int, username: str = "yhb18174", run_mins: int=0):
+    def _submit_jobs(self, max_time: int, username: str = "yhb18174"):
         """
         Description
         -----------
@@ -531,9 +406,8 @@ fi
 
         Parameters
         ----------
-        run_hrs (int)       Maximum time to run the docking for
+        max_time (int)      Maximum time to run the docking for
         username (str)      Username which the submitted scripts will be under
-        run_mins (int)      Minutes runtime to run docking
         """
 
         start_time = time.time()
@@ -544,18 +418,19 @@ fi
                 [
                     (
                         molid,
-                        run_hrs,
+                        max_time,
                         mol_dir,
-                        f"all_confs_{molid}_pH74.sdf",
+                        f"{molid}.sdf",
                         f"{molid}_pose.sdf",
                         f"{molid}.log",
-                        run_mins,
                     )
                     for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls)
                 ],
             )
 
         job_ids = [jobid for jobid in results if jobid is not None]
+
+        timeout = max_time * 60 * 60
 
         while True:
             dock_jobs = []
@@ -571,14 +446,17 @@ fi
 
             if not dock_jobs:
                 print("All docking done")
-                molids, top_cnn_scores, top_aff_scores = self.MakeCsv(
-                    save_data=True
+                all_docking_scores, top_scores = self._make_docking_csvs(
+                    molid_ls=self.molid_ls, save_data=True
                 )
-                print(top_aff_scores)
-                print(top_cnn_scores)
-                self.CompressFiles()
-                return self.molid_ls, top_cnn_scores, top_aff_scores
-            
+                self._compress_files()
+                return self.molid_ls, top_scores
+
+            runtime = time.time() - start_time
+            if runtime > timeout:
+                print("Timeout reached")
+                break
+
             if len(dock_jobs) < 10:
                 job_message = f'Waiting for the following jobs to complete: {", ".join(dock_jobs)}'
             else:
@@ -587,7 +465,7 @@ fi
             print(f"\r{job_message.ljust(80)}", end="")
             time.sleep(20)
 
-    def MakeCsv(self, save_data: bool = True, mol_dir_path_ls: list=None, molid_ls: list=None):
+    def _make_docking_csvs(self, molid_ls: list, save_data: bool = False):
         """
         Description
         -----------
@@ -595,6 +473,7 @@ fi
 
         Parameters
         ----------
+        molid_ls (list)         List of molecule IDs to find the molecule directories
         save_data (bool)        Flag to save the made .csv.gz files
 
         Returns
@@ -603,76 +482,57 @@ fi
         2: List of the highest scores for each docked molecule
         """
 
-        if mol_dir_path_ls is not None and molid_ls is not None:
-            self.mol_dir_path_ls = mol_dir_path_ls
-            self.molid_ls = molid_ls
-
-        top_cnn_aff_ls = []
-        top_aff_ls = []
-
-        for mol_dir, molid in zip(self.mol_dir_path_ls, self.molid_ls):
-            combined_df = pd.DataFrame()
+        df_ls = []
+        top_score_ls = []
+        for mol_dir, molid in zip(self.mol_dir_path_ls, molid_ls):
 
             with open(mol_dir + molid + ".log", "r") as file:
                 lines = file.readlines()
 
-            table_start_indices = []
             for n, line in enumerate(lines):
                 if line.startswith("mode |"):
-                    table_start_indices.append(n)
-            
-            for j, start_idx in enumerate(table_start_indices):
-                df_lines = lines[start_idx + 3 :]
-                pose_ls = []
-                aff_ls = []
-                intra_ls = []
-                cnn_pose_score_ls = []
-                cnn_aff_ls = []
+                    start_idx = n
+            df_lines = lines[start_idx + 3 :]
 
-                for l in df_lines:
-                    if l.strip() == "" or l.startswith("mode |") or l.startswith("Using random seed"):
-                        # Stopping if hit end of given table
-                        break
-                    items = re.split(r"\s+", l.strip())
-                    pose_ls.append(items[0])
-                    aff_ls.append(items[1])
-                    intra_ls.append(items[2])
-                    cnn_pose_score_ls.append(items[3])
-                    cnn_aff_ls.append(items[4])
+            pose_ls = []
+            aff_ls = []
+            intra_ls = []
+            cnn_pose_score_ls = []
+            cnn_aff_ls = []
 
-                    docking_df = pd.DataFrame(
-                        data={
-                            "ID":[f'{molid}_conf_{j}_pose_{pose}' for pose in pose_ls],
-                            "conf_no":j,
-                            "Pose_no": pose_ls,
-                            "Affinity(kcal/mol)":aff_ls,
-                            "Intramol(kcal/mol)":intra_ls,
-                            "CNN_Pose_Score":cnn_pose_score_ls,
-                            "CNN_affinity": cnn_aff_ls
-                        }
-                    )
+            for l in df_lines:
+                items = re.split(r"\s+", l)
+                pose_ls.append(items[1])
+                aff_ls.append(items[2])
+                intra_ls.append(items[3])
+                cnn_pose_score_ls.append(items[4])
+                cnn_aff_ls.append(items[5])
 
-                    combined_df = pd.concat([combined_df, docking_df], ignore_index=True)
-            try:
-                max_cnn = combined_df['CNN_affinity'].astype(float).max()
-                min_aff = combined_df["Affinity(kcal/mol)"].astype(float).min()
-            except:
-                max_cnn = "False"
-                min_aff = "False"
-            finally:
+            docking_df = pd.DataFrame(
+                data={
+                    "Pose_Number": pose_ls,
+                    "Affinity(kcal_mol)": aff_ls,
+                    "Intramol(kcal/mol)": intra_ls,
+                    "CNN_Pose_Score": cnn_pose_score_ls,
+                    "CNN_affinity": cnn_aff_ls,
+                }
+            ).set_index("Pose_Number")
 
-                top_cnn_aff_ls.append(max_cnn)
-                top_aff_ls.append(min_aff)
-                
-        if save_data:
-            combined_df.to_csv(
-                f"{mol_dir}{molid}_all_scores.csv.gz",
-                compression="gzip",
-                index="ID",
-            )
-        return self.molid_ls, top_cnn_aff_ls, top_aff_ls
+            docking_df.sort_values(by="CNN_affinity", ascending=False, inplace=True)
 
-    def CompressFiles(self):
+            if save_data:
+                docking_df.to_csv(
+                    f"{mol_dir}{molid}_all_scores.csv.gz",
+                    compression="gzip",
+                    index="Pose_Number",
+                )
+
+            df_ls.append(docking_df)
+            top_score_ls.append(docking_df["CNN_affinity"].iloc[0])
+
+        return df_ls, top_score_ls
+
+    def _compress_files(self):
         """
         Description
         -----------
