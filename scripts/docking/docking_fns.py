@@ -31,8 +31,8 @@ def WaitForDocking(
 ):
     while True:
         dock_df = pd.read_csv(dock_csv, index_col='ID', dtype=str)
-        idx_df = dock_df[dock_df.index.isin(idxs_in_batch)]
-        pending_docking = idx_df[idx_df[scores_col] == 'PD']
+        df_with_idx = dock_df[dock_df.index.isin(idxs_in_batch)]
+        pending_docking = df_with_idx[df_with_idx[scores_col] == 'PD']
 
         if pending_docking.empty:
             print('All docking scores present')
@@ -423,11 +423,13 @@ class Run_GNINA:
     def _create_submit_script(
         self,
         molid: str,
-        max_time: int,
+        run_hrs: int,
         mol_dir: str,
         sdf_filename: str,
         output_filename: str,
         log_filename: str,
+        run_mins: int=0
+
     ):
         """
         Description
@@ -437,7 +439,7 @@ class Run_GNINA:
         Parameters
         ----------
         molid (str)             ID of the molecule to dock
-        max_time (int)          Maximum time which the docking can run for (has to be a whole number between 1 and 168)
+        run_hrs (int)          Maximum time which the docking can run for (has to be a whole number between 1 and 168)
         mol_dir (str)           Pathway to the molecule docking directory
         sdf_filename (str)      Filename and path to the .sdf file to dock
         output_filename (str)   Name to save the output .sdf under
@@ -451,7 +453,7 @@ class Run_GNINA:
         gnina_script = f"""\
 #!/bin/bash
 #SBATCH --export=ALL
-#SBATCH --time {max_time}:00:00
+#SBATCH --time {run_hrs}:{run_mins}:00
 #SBATCH --job-name=dock_{molid}
 #SBATCH --ntasks={self.num_cpu}
 #SBATCH --partition=standard
@@ -521,7 +523,7 @@ fi
             print(f"Error in submitting job: {e}")
             return None
 
-    def SubmitJobs(self, max_time: int, username: str = "yhb18174"):
+    def SubmitJobs(self, run_hrs: int, username: str = "yhb18174", run_mins: int=0):
         """
         Description
         -----------
@@ -529,8 +531,9 @@ fi
 
         Parameters
         ----------
-        max_time (int)      Maximum time to run the docking for
+        run_hrs (int)       Maximum time to run the docking for
         username (str)      Username which the submitted scripts will be under
+        run_mins (int)      Minutes runtime to run docking
         """
 
         start_time = time.time()
@@ -541,19 +544,18 @@ fi
                 [
                     (
                         molid,
-                        max_time,
+                        run_hrs,
                         mol_dir,
                         f"all_confs_{molid}_pH74.sdf",
                         f"{molid}_pose.sdf",
                         f"{molid}.log",
+                        run_mins,
                     )
                     for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls)
                 ],
             )
 
         job_ids = [jobid for jobid in results if jobid is not None]
-
-        timeout = max_time * 60 * 60
 
         while True:
             dock_jobs = []
@@ -569,21 +571,14 @@ fi
 
             if not dock_jobs:
                 print("All docking done")
-                all_docking_scores, top_scores = self.MakeCsv(
+                molids, top_cnn_scores, top_aff_scores = self.MakeCsv(
                     save_data=True
                 )
+                print(top_aff_scores)
+                print(top_cnn_scores)
                 self.CompressFiles()
-                return self.molid_ls, top_scores
-
-            runtime = time.time() - start_time
-            if runtime > timeout:
-                print("Timeout reached")
-                all_docking_scores, top_scores = self.MakeCsv(
-                    save_data=True
-                )
-                self.CompressFiles()
-                return self.molid_ls, top_scores
-
+                return self.molid_ls, top_cnn_scores, top_aff_scores
+            
             if len(dock_jobs) < 10:
                 job_message = f'Waiting for the following jobs to complete: {", ".join(dock_jobs)}'
             else:
@@ -592,7 +587,7 @@ fi
             print(f"\r{job_message.ljust(80)}", end="")
             time.sleep(20)
 
-    def MakeCsv(self, save_data: bool = False):
+    def MakeCsv(self, save_data: bool = True, mol_dir_path_ls: list=None, molid_ls: list=None):
         """
         Description
         -----------
@@ -608,55 +603,74 @@ fi
         2: List of the highest scores for each docked molecule
         """
 
-        df_ls = []
-        top_score_ls = []
+        if mol_dir_path_ls is not None and molid_ls is not None:
+            self.mol_dir_path_ls = mol_dir_path_ls
+            self.molid_ls = molid_ls
+
+        top_cnn_aff_ls = []
+        top_aff_ls = []
+
         for mol_dir, molid in zip(self.mol_dir_path_ls, self.molid_ls):
+            combined_df = pd.DataFrame()
 
             with open(mol_dir + molid + ".log", "r") as file:
                 lines = file.readlines()
 
+            table_start_indices = []
             for n, line in enumerate(lines):
                 if line.startswith("mode |"):
-                    start_idx = n
-            df_lines = lines[start_idx + 3 :]
+                    table_start_indices.append(n)
+            
+            for j, start_idx in enumerate(table_start_indices):
+                df_lines = lines[start_idx + 3 :]
+                pose_ls = []
+                aff_ls = []
+                intra_ls = []
+                cnn_pose_score_ls = []
+                cnn_aff_ls = []
 
-            pose_ls = []
-            aff_ls = []
-            intra_ls = []
-            cnn_pose_score_ls = []
-            cnn_aff_ls = []
+                for l in df_lines:
+                    if l.strip() == "" or l.startswith("mode |") or l.startswith("Using random seed"):
+                        # Stopping if hit end of given table
+                        break
+                    items = re.split(r"\s+", l.strip())
+                    pose_ls.append(items[0])
+                    aff_ls.append(items[1])
+                    intra_ls.append(items[2])
+                    cnn_pose_score_ls.append(items[3])
+                    cnn_aff_ls.append(items[4])
 
-            for l in df_lines:
-                items = re.split(r"\s+", l)
-                pose_ls.append(items[1])
-                aff_ls.append(items[2])
-                intra_ls.append(items[3])
-                cnn_pose_score_ls.append(items[4])
-                cnn_aff_ls.append(items[5])
+                    docking_df = pd.DataFrame(
+                        data={
+                            "ID":[f'{molid}_conf_{j}_pose_{pose}' for pose in pose_ls],
+                            "conf_no":j,
+                            "Pose_no": pose_ls,
+                            "Affinity(kcal/mol)":aff_ls,
+                            "Intramol(kcal/mol)":intra_ls,
+                            "CNN_Pose_Score":cnn_pose_score_ls,
+                            "CNN_affinity": cnn_aff_ls
+                        }
+                    )
 
-            docking_df = pd.DataFrame(
-                data={
-                    "Pose_Number": pose_ls,
-                    "Affinity(kcal_mol)": aff_ls,
-                    "Intramol(kcal/mol)": intra_ls,
-                    "CNN_Pose_Score": cnn_pose_score_ls,
-                    "CNN_affinity": cnn_aff_ls,
-                }
-            ).set_index("Pose_Number")
+                    combined_df = pd.concat([combined_df, docking_df], ignore_index=True)
+            try:
+                max_cnn = combined_df['CNN_affinity'].astype(float).max()
+                min_aff = combined_df["Affinity(kcal/mol)"].astype(float).min()
+            except:
+                max_cnn = "False"
+                min_aff = "False"
+            finally:
 
-            docking_df.sort_values(by="CNN_affinity", ascending=False, inplace=True)
-
-            if save_data:
-                docking_df.to_csv(
-                    f"{mol_dir}{molid}_all_scores.csv.gz",
-                    compression="gzip",
-                    index="Pose_Number",
-                )
-
-            df_ls.append(docking_df)
-            top_score_ls.append(docking_df["CNN_affinity"].iloc[0])
-
-        return df_ls, top_score_ls
+                top_cnn_aff_ls.append(max_cnn)
+                top_aff_ls.append(min_aff)
+                
+        if save_data:
+            combined_df.to_csv(
+                f"{mol_dir}{molid}_all_scores.csv.gz",
+                compression="gzip",
+                index="ID",
+            )
+        return self.molid_ls, top_cnn_aff_ls, top_aff_ls
 
     def CompressFiles(self):
         """

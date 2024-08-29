@@ -19,7 +19,7 @@ PROJ_DIR = str(Path(__file__).parent.parent.parent)
 # Inserting paths to relevant functions
 # Models
 sys.path.insert(0, PROJ_DIR + "/scripts/models/")
-from portable_RF_class import RF_model
+from RF_class import RF_model
 
 # Docking
 sys.path.insert(0, PROJ_DIR + "/scripts/docking/")
@@ -68,11 +68,11 @@ class RecDMTA:
                  max_runtime: int=60*60*168,
                  max_it_runtime: int=60*60*10,
                  hyper_params: dict={
-                     'rf__n_estimators': [500],
+                     'rf__n_estimators': [100],
                      'rf__max_features': ['sqrt'],
-                     'rf__max_depth': [10, 15, 20, 25],
-                     'rf__min_samples_split': [2, 5, 10],
-                     'rf__min_samples_leaf': [2, 5, 10]
+                     'rf__max_depth': [15, 20, 25],
+                     'rf__min_samples_split': [2, 5],
+                     'rf__min_samples_leaf': [2, 5]
                  }
                  ):
         """
@@ -339,14 +339,19 @@ class RecDMTA:
         
         # Docking the molecules and saving scores in for_docking
             dock_scores_ls = docker.SubmitJobs(max_time=1)
-            for_docking[self.docking_column] = dock_scores_ls[1]
+
+            if self.docking_column == "CNN_affinity":
+                n = 1
+            else:
+                n=2
+            for_docking[self.docking_column] = dock_scores_ls[2]
 
             da.get_exclusive_access()
 
             da.edit_df(
                 column_to_edit=self.docking_column,
                 idxs_to_edit=molid_ls,
-                vals_to_enter=dock_scores_ls[1]
+                vals_to_enter=dock_scores_ls[2]
             )
 
             da.release_file()
@@ -355,6 +360,10 @@ class RecDMTA:
                 docking_score_batch_file,
                 idxs_in_batch=idxs_in_batch
             )
+
+            da.MakeCsv()
+
+            da.CompressFiles()
 
             self.fin_dock_df=pd.read_csv(docking_score_batch_file, index_col=0)
             return self.fin_dock_df.loc[self.df_select.index]

@@ -167,7 +167,6 @@ if make_full_data:
 
 
     file_paths = glob(f'{desc_filepath}rdkit/full_data/PMG_rdkit_*.csv')
-    print(file_paths)
 
     def extract_number(filename):
         """
@@ -191,7 +190,8 @@ if make_full_data:
         py_docking_df = pd.DataFrame()
         py_docking_df.index = chunks.index
         py_docking_df['SMILES'] = chunks['SMILES']
-        py_docking_df['CNN_affinity'] = 'N/A'
+        #py_docking_df['CNN_affinity'] = 'N/A'
+        py_docking_df['Affinity(kcal/mol)'] = 'N/A'
         py_docking_df.to_csv(f'{docking_dir}PMG_docking_{i+1}.csv',
                             index_label='ID')
 
