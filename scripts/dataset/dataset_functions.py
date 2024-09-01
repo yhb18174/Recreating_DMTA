@@ -675,8 +675,8 @@ class Dataset_Formatter:
         """
         return self._get_descriptors(*args)
 
-    def _gen_descriptors(self, mol, descriptor_set:str, missingVal=None):
-        if descriptor_set == 'RDKit':
+    def _gen_descriptors(self, mol, descriptor_set: str, missingVal=None):
+        if descriptor_set == "RDKit":
             for name, func in Descriptors._descList:
                 try:
                     val = func(mol)
@@ -684,14 +684,16 @@ class Dataset_Formatter:
                     traceback.print_exc()
                     val = missingVal
                 yield name, val
-        
-        elif descriptor_set == 'Mordred':
+
+        elif descriptor_set == "Mordred":
             calc = Calculator(descriptors, ignore_3D=True)
 
             try:
                 desc = calc(mol)
                 for name, value in desc.items():
-                    yield str(name), np.float32(value) if value is not None else missingVal
+                    yield str(name), np.float32(
+                        value
+                    ) if value is not None else missingVal
             except Exception as e:
                 traceback.print_exc()
                 for descriptor in calc.descriptors:
@@ -700,11 +702,12 @@ class Dataset_Formatter:
     def _descriptor_worker(self, smi, descriptor_set, missingVal=None):
         mol = Chem.MolFromSmiles(smi)
         if mol is not None:
-            descriptor_dict = dict(self._gen_descriptors(mol, descriptor_set, missingVal))
+            descriptor_dict = dict(
+                self._gen_descriptors(mol, descriptor_set, missingVal)
+            )
             return descriptor_dict
         return {}
-    
-        
+
     def LoadData(
         self,
         mol_dir: str,
@@ -781,7 +784,12 @@ class Dataset_Formatter:
         ]
 
         for i, (chunk, args) in enumerate(
-            tqdm(zip(chunks, arguments), desc="Processing chunks", unit="chunks", total=len(chunks))
+            tqdm(
+                zip(chunks, arguments),
+                desc="Processing chunks",
+                unit="chunks",
+                total=len(chunks),
+            )
         ):
             processed_mols = self._process_mols_wrapper(args)
             canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = processed_mols
@@ -812,32 +820,23 @@ class Dataset_Formatter:
 
         return self.final_file_ls
 
-    def _calc_desc_mp(
-            self, chunk: pd.DataFrame, descriptor_set: str
-    ):
+    def _calc_desc_mp(self, chunk: pd.DataFrame, descriptor_set: str):
         rows = chunk.to_dict("records")
 
         descriptors = [
-            (
-                Chem.MolFromSmiles(row['SMILES']),
-                None,
-                descriptor_set,
-            )
-            for row in rows
+            (Chem.MolFromSmiles(row["SMILES"]), None, descriptor_set,) for row in rows
         ]
-         
+
         with Pool() as pool:
             desc_mp_item = pool.map(self._get_descriptors_wrapper, descriptors)
 
         return desc_mp_item
 
-    def _gen_desc_mp(
-        self, chunk: pd.DataFrame, descriptor_set: str, missingVal=None
-    ):
+    def _gen_desc_mp(self, chunk: pd.DataFrame, descriptor_set: str, missingVal=None):
         rows = chunk.to_dict("records")
 
-        args = [(row['SMILES'], descriptor_set, missingVal) for row in rows]
-         
+        args = [(row["SMILES"], descriptor_set, missingVal) for row in rows]
+
         with Pool() as pool:
             desc_mp_item = pool.starmap(self._descriptor_worker, args)
 
@@ -863,7 +862,9 @@ class Dataset_Formatter:
         1: List of file pathways to the descriptor files
         2: List of file pathways to the full files
         """
-        print("\n=======================\nCalculating descriptors\n=======================\n")
+        print(
+            "\n=======================\nCalculating descriptors\n=======================\n"
+        )
         # Setting up temporary df so to not save over self.smi_df
         if csv_list is not None:
             self.final_file_ls = csv_list
@@ -872,10 +873,10 @@ class Dataset_Formatter:
         self.full_fpath_ls = []
 
         for i, file in enumerate(
-            tqdm(self.final_file_ls, desc='Processing chunks', unit='chunks')
+            tqdm(self.final_file_ls, desc="Processing chunks", unit="chunks")
         ):
-            tmp_df = pd.read_csv(file, index_col='ID', compression='gzip')
-            chunks = np.array_split(tmp_df, np.ceil(len(tmp_df)/1000))
+            tmp_df = pd.read_csv(file, index_col="ID", compression="gzip")
+            chunks = np.array_split(tmp_df, np.ceil(len(tmp_df) / 1000))
             # Getting the descriptors for each mol object and saving the dictionary
             # in a column named descriptors
 
@@ -931,7 +932,6 @@ class Dataset_Formatter:
 
         return self.desc_fpath_ls, self.full_fpath_ls
 
-    
     def FilterMols(
         self,
         rdkit_or_mordred: str,
@@ -946,7 +946,7 @@ class Dataset_Formatter:
         chembl: bool = False,
         save_dir: str = None,
         chunksize: int = 1000,
-        full_fpath_ls: list = []
+        full_fpath_ls: list = [],
     ):
         """
         Description
@@ -967,20 +967,24 @@ class Dataset_Formatter:
         -------
         A list of file pathways to filtered chunks
         """
-        
-        print("\n=======================\nFiltering Molecules\n=======================\n")
+
+        print(
+            "\n=======================\nFiltering Molecules\n=======================\n"
+        )
 
         self.filt_fpath_ls = []
         if full_fpath_ls:
             self.full_fpath_ls = full_fpath_ls
         else:
-            print('No files to process')
+            print("No files to process")
             return []
-        
+
         for i, file in enumerate(
             tqdm(self.full_fpath_ls, desc="Filtering chunks", unit="chunks")
         ):
-            chunk_reader = pd.read_csv(file, index_col='ID', compression='gzip', chunksize=chunksize)
+            chunk_reader = pd.read_csv(
+                file, index_col="ID", compression="gzip", chunksize=chunksize
+            )
             filtered_chunks = []
 
             for df in chunk_reader:
@@ -991,14 +995,16 @@ class Dataset_Formatter:
                         & (df["NumAromaticRings"] <= n_arom_rings_limit)
                         & (df["PFI"] <= PFI_limit)
                         & (df["Lilly_rules_pass"] == pass_lilly_rules)
-                        & (df['NumHDonors'] <= num_h_don)
-                        & (df['NumHAcceptors'] <= num_h_acc)
+                        & (df["NumHDonors"] <= num_h_don)
+                        & (df["NumHAcceptors"] <= num_h_acc)
                     ]
 
                     all_passing_mols = all_passing_mols.copy()
 
-                    all_passing_mols.loc[:, 'Mol'] = all_passing_mols['Lilly_rules_SMILES'].apply(lambda x: Chem.MolFromSmiles(x))
-                    all_passing_mols = all_passing_mols[all_passing_mols['Mol'].notna()]
+                    all_passing_mols.loc[:, "Mol"] = all_passing_mols[
+                        "Lilly_rules_SMILES"
+                    ].apply(lambda x: Chem.MolFromSmiles(x))
+                    all_passing_mols = all_passing_mols[all_passing_mols["Mol"].notna()]
 
                     filtered_smi = []
                     for index, rows in all_passing_mols.iterrows():
@@ -1009,18 +1015,24 @@ class Dataset_Formatter:
                                 filtered_smi.append(rows["SMILES"])
 
                     filtered_smi_set = set(filtered_smi)
-                    filtered_results = all_passing_mols[~all_passing_mols["SMILES"].isin(filtered_smi_set)]
+                    filtered_results = all_passing_mols[
+                        ~all_passing_mols["SMILES"].isin(filtered_smi_set)
+                    ]
 
                 else:
                     filtered_results = df
-            
-                filtered_results = filtered_results.drop(columns=['Mol'])
+
+                filtered_results = filtered_results.drop(columns=["Mol"])
                 filtered_chunks.append(filtered_results)
 
                 full_filtered_df = pd.concat(filtered_chunks)
 
-                filt_results_fpath = f"{save_dir}{rdkit_or_mordred}_filtered_results_batch_{i+1}.csv.gz"
-                full_filtered_df.to_csv(filt_results_fpath, index="ID", compression="gzip")
+                filt_results_fpath = (
+                    f"{save_dir}{rdkit_or_mordred}_filtered_results_batch_{i+1}.csv.gz"
+                )
+                full_filtered_df.to_csv(
+                    filt_results_fpath, index="ID", compression="gzip"
+                )
                 self.filt_fpath_ls.append(filt_results_fpath)
 
         return self.filt_fpath_ls
@@ -1035,7 +1047,6 @@ class Dataset_Formatter:
         filename: str = None,
         index_prefix: str = "HW",
         filt_fpath_ls: list = [],
-
     ):
         """
         Description
@@ -1057,7 +1068,9 @@ class Dataset_Formatter:
         1: List of pathways to the full filtered files
         2: List of pathways to the filtered descriptor files
         """
-        print("\n=======================\nMaking Final Chunks\n=======================\n")
+        print(
+            "\n=======================\nMaking Final Chunks\n=======================\n"
+        )
 
         if filt_fpath_ls:
             self.filt_fpath_ls = filt_fpath_ls
@@ -1069,14 +1082,17 @@ class Dataset_Formatter:
         chunk_counter = 1
 
         for file_index, file in enumerate(
-            tqdm(self.filt_fpath_ls, desc='Making final chunks', unit='chunks')
-            ):
+            tqdm(self.filt_fpath_ls, desc="Making final chunks", unit="chunks")
+        ):
             df = pd.read_csv(file, index_col="ID", compression="gzip")
             concat = pd.concat([df, not_full_df], ignore_index=True)
 
             while len(concat) > chunksize:
                 full_chunk = concat.iloc[:chunksize]
-                full_chunk.index = [f"{index_prefix}-{i+1}" for i in range(global_index, global_index + chunksize)]
+                full_chunk.index = [
+                    f"{index_prefix}-{i+1}"
+                    for i in range(global_index, global_index + chunksize)
+                ]
                 global_index += chunksize
                 fpath = f"{full_save_path}{filename}_{chunk_counter}.csv.gz"
                 full_chunk.to_csv(fpath, compression="gzip", index_label="ID")
@@ -1089,7 +1105,10 @@ class Dataset_Formatter:
             not_full_df = concat
 
         if not_full_df.shape[0] > 0:
-            not_full_df.index = [f"{index_prefix}-{i+1}" for i in range(global_index, global_index + len(not_full_df))]
+            not_full_df.index = [
+                f"{index_prefix}-{i+1}"
+                for i in range(global_index, global_index + len(not_full_df))
+            ]
             fpath = f"{full_save_path}{filename}_{chunk_counter}.csv.gz"
             not_full_df.to_csv(fpath, index_label="ID", compression="gzip")
             print(f"Written {len(not_full_df)} molecules to {fpath}")
@@ -1113,9 +1132,9 @@ class Dataset_Formatter:
                     elif desc == "MW":
                         columns.append("MolWt")
                     elif desc == "nHBAcc":
-                        columns.append('NumHAcceptors')
+                        columns.append("NumHAcceptors")
                     elif desc == "nHBDon":
-                        columns.append('NumHDonors')
+                        columns.append("NumHDonors")
                     else:
                         columns.append(desc)
 
@@ -1130,6 +1149,7 @@ class Dataset_Formatter:
             )
 
         return full_fpath_ls, desc_fpath_ls
+
 
 class Dataset_Accessor:
     def __init__(

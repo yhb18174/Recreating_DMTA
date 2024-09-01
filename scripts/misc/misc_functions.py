@@ -13,7 +13,7 @@ import time
 #     Description
 #     -----------
 #     Function to get the batch which the molecule is in from its ID
-    
+
 #     Parameters
 #     ----------
 #     molid (str)         ID of a molecule
@@ -38,10 +38,8 @@ import time
 #         else:
 #             prev_check = n_mols
 
-def molid2batchno(molid: str,
-                  prefix: str,
-                  dataset_file: str,
-                  chunksize: int = 100000):
+
+def molid2batchno(molid: str, prefix: str, dataset_file: str, chunksize: int = 100000):
     """
     Description
     -----------
@@ -58,25 +56,28 @@ def molid2batchno(molid: str,
     -------
     Batch number which the molecule with molid is in
     """
-    
+
     # Extract the molecule number from its ID
-    mol_no = int(molid.replace(prefix, ''))
-    
+    mol_no = int(molid.replace(prefix, ""))
+
     # List and sort files
     file_ls = glob(dataset_file)
-    file_ls.sort(key=lambda x: int(re.search(r'\d+', x).group()))
-    
+    file_ls.sort(key=lambda x: int(re.search(r"\d+", x).group()))
+
     # Determine the batch number
     batch_number = (mol_no - 1) // chunksize + 1
-    
+
     # Check if batch number exceeds number of available files
     if batch_number > len(file_ls):
-        raise ValueError(f"Batch number {batch_number} exceeds the number of available dataset files.")
-    
+        raise ValueError(
+            f"Batch number {batch_number} exceeds the number of available dataset files."
+        )
+
     return batch_number
 
+
 def lock_file(file_path: str):
-    
+
     """
     Description
     -----------
@@ -94,13 +95,13 @@ def lock_file(file_path: str):
 
     while True:
         try:
-            with open(file_path, 'r', newline='') as file:
+            with open(file_path, "r", newline="") as file:
                 fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                print(f'Acquired lock on {file}')
+                print(f"Acquired lock on {file}")
                 return file
         except BlockingIOError:
-             print(f'File {file} is locked. Waiting...')
-             time.sleep(30)
+            print(f"File {file} is locked. Waiting...")
+            time.sleep(30)
 
 
 def unlock_file(file: object):

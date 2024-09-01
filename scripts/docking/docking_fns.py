@@ -9,9 +9,12 @@ from pathlib import Path
 from multiprocessing import Pool
 import os
 import random as rand
+import warnings
 
 # Import Openeye Modules
 from openeye import oechem
+#Muting GPU warning
+oechem.OEThrow.SetLevel(oechem.OEErrorLevel_Error)
 from openeye import oequacpac, oeomega
 
 PROJ_DIR = str(Path(__file__).parent.parent.parent)
@@ -26,8 +29,9 @@ except KeyError:
 def WaitForDocking(
     dock_csv: str,
     idxs_in_batch: list,
+    scores_col: str,
     check_interval: int=30,
-    scores_col: str='CNN_affinity'
+
 ):
     while True:
         dock_df = pd.read_csv(dock_csv, index_col='ID', dtype=str)
@@ -44,11 +48,11 @@ def WaitForDocking(
 def GetUndocked(
         dock_df: pd.DataFrame,
         idxs_in_batch: list,
-        scores_col: str='CNN_affinity'
+        scores_col: str
 ):
     df = dock_df.loc[idxs_in_batch]
+    df[scores_col] = pd.to_numeric(df[scores_col], errors='coerce')
     undocked = df[df[scores_col].isna()]
-    
     return undocked
 
 
@@ -87,7 +91,6 @@ class Run_GNINA:
         -----------
         Initialisation of the class, setting all of the GNINA values required for the docking.
         Makes directories for each molecule ID.
-        By default uses the CNN_Affinity rescored version of the docking scores.
 
         Parameters
         ----------
@@ -296,8 +299,6 @@ class Run_GNINA:
         tautomer_opts = oequacpac.OETautomerOptions()
         tautomer_opts.SetMaxSearchTime(300)
         tautomer_opts.SetRankTautomers(True)
-         # SetCarbonHybridization = False stops sp2-sp3 changes in tautomer enumeration
-        # tautomer_opts.SetCarbonHybridization(False)
         tautomer_opts.SetCarbonHybridization(False)
 
         # enantiomer options
@@ -439,7 +440,7 @@ class Run_GNINA:
         Parameters
         ----------
         molid (str)             ID of the molecule to dock
-        run_hrs (int)          Maximum time which the docking can run for (has to be a whole number between 1 and 168)
+        run_hrs (int)           Maximum time which the docking can run for (has to be a whole number between 1 and 168)
         mol_dir (str)           Pathway to the molecule docking directory
         sdf_filename (str)      Filename and path to the .sdf file to dock
         output_filename (str)   Name to save the output .sdf under
@@ -464,8 +465,7 @@ class Run_GNINA:
 # Prologue script to record job details
 # Do not change the line below
 #=========================================================
-if [ -f /opt/software/scripts/job_prologue.sh ]
-then
+if [ -f /opt/software/scripts/job_prologue.sh ]; then
     /opt/software/scripts/job_prologue.sh
 fi
 #----------------------------------------------------------
@@ -474,33 +474,32 @@ module purge
 module load anaconda/python-3.9.7
 
 source activate {self.env_name}
-        
-{self.gnina_path} \\
-    --receptor "{self.receptor_path}" \\
-    --ligand "{mol_dir}{sdf_filename}" \\
-    --out "{mol_dir}{output_filename}" \\
-    --log "{mol_dir}{log_filename}" \\
-    --center_x {self.center_x} \\
-    --center_y {self.center_y} \\
-    --center_z {self.center_z} \\
-    --size_x {self.size_x} \\
-    --size_y {self.size_y} \\
-    --size_z {self.size_z} \\
-    --exhaustiveness {self.exhaustiveness} \\
-    --num_modes {self.num_modes} \\
-    --cpu {self.num_cpu} \\
-    --no_gpu \\
-    --addH {self.addH} \\
-    --stripH {self.stripH} \\
-    --seed {self.seed} \\
+
+{self.gnina_path} \
+    --receptor "{self.receptor_path}" \
+    --ligand "{mol_dir}{sdf_filename}" \
+    --out "{mol_dir}{output_filename}" \
+    --log "{mol_dir}{log_filename}" \
+    --center_x {self.center_x} \
+    --center_y {self.center_y} \
+    --center_z {self.center_z} \
+    --size_x {self.size_x} \
+    --size_y {self.size_y} \
+    --size_z {self.size_z} \
+    --exhaustiveness {self.exhaustiveness} \
+    --num_modes {self.num_modes} \
+    --cpu {self.num_cpu} \
+    --no_gpu \
+    --addH {self.addH} \
+    --stripH {self.stripH} \
+    --seed {self.seed} \
     --cnn_scoring "{self.cnn_scoring}"
 
 #=========================================================
 # Epilogue script to record job endtime and runtime
 # Do not change the line below
 #=========================================================
-if [ -f /opt/software/scripts/job_epilogue.sh ]
-then
+if [ -f /opt/software/scripts/job_epilogue.sh ]; then
     /opt/software/scripts/job_epilogue.sh
 fi
 #----------------------------------------------------------
@@ -508,22 +507,36 @@ fi
 
         script_name = str(Path(mol_dir)) + "/" f"{molid}_docking_script.sh"
 
+        print(script_name)
+
         with open(script_name, "w") as file:
             file.write(gnina_script)
 
-        subprocess.run(["chmod", "+x", script_name])
+        subprocess.run(["chmod", "+x", script_name], check=True)
+        print("Made script excecutable")
 
         try:
             result = subprocess.run(
                 ["sbatch", script_name], capture_output=True, text=True, check=True
             )
+
+            with open(str(mol_dir)+'stdout.txt', 'w') as stdout:
+                stdout.write(stdout)
+
+            with open(str(mol_dir)+'stderr.txt', 'w') as stderr:
+                stdout.write(stderr)
+
             jobid = re.search(r"Submitted batch job (\d+)", result.stdout).group(1)
+            print(f"Submitted Job ID:\n{jobid}")
+
             return jobid
         except subprocess.CalledProcessError as e:
             print(f"Error in submitting job: {e}")
             return None
+        except Exception as e:
+            print(e)
 
-    def SubmitJobs(self, run_hrs: int, username: str = "yhb18174", run_mins: int=0):
+    def SubmitJobs(self, run_hrs: int, username: str = "yhb18174", run_mins: int=0, use_multiprocessing=True):
         """
         Description
         -----------
@@ -536,26 +549,40 @@ fi
         run_mins (int)      Minutes runtime to run docking
         """
 
-        start_time = time.time()
+        if use_multiprocessing:
+            with Pool() as pool:
+                results = pool.starmap(
+                    self._create_submit_script,
+                    [
+                        (
+                            molid,
+                            run_hrs,
+                            mol_dir,
+                            f"all_confs_{molid}_pH74.sdf",
+                            f"{molid}_pose.sdf",
+                            f"{molid}.log",
+                            run_mins,
+                        )
+                        for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls)
+                    ],
+                )
+        
+            job_ids = [jobid for jobid in results if jobid is not None]
 
-        with Pool() as pool:
-            results = pool.starmap(
-                self._create_submit_script,
-                [
-                    (
-                        molid,
-                        run_hrs,
-                        mol_dir,
-                        f"all_confs_{molid}_pH74.sdf",
-                        f"{molid}_pose.sdf",
-                        f"{molid}.log",
-                        run_mins,
-                    )
-                    for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls)
-                ],
-            )
+        else:
+            job_ids = []
+            for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls):
 
-        job_ids = [jobid for jobid in results if jobid is not None]
+                jobid = self._create_submit_script(
+                            molid,
+                            run_hrs,
+                            mol_dir,
+                            f"all_confs_{molid}_pH74.sdf",
+                            f"{molid}_pose.sdf",
+                            f"{molid}.log",
+                            run_mins,
+                        )
+                job_ids.append(jobid)
 
         while True:
             dock_jobs = []
@@ -570,9 +597,7 @@ fi
             dock_jobs = set(job_id for job_id in job_ids if job_id in job_lines)
 
             if not dock_jobs:
-                print("All docking done")
                 molids, top_cnn_scores, top_aff_scores = self.MakeCsv(
-                    save_data=True
                 )
                 print(top_aff_scores)
                 print(top_cnn_scores)

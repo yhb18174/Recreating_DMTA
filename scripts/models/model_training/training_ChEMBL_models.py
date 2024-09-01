@@ -7,65 +7,49 @@ sys.path.insert(0, str(FILE_DIR.parent))
 from RF_class import RF_model
 import pandas as pd
 
-model=RF_model()
 n_resamples = 50
-inner_cv_type = 'kfold',
+inner_cv_type = ("kfold",)
 n_splits = 5
 tr_te_split = 0.3
-search_type = 'grid'
-loss_function = 'neg_mean_squared_error'
+search_type = "grid"
+loss_function = "neg_mean_squared_error"
+docking_column = "Affinity(kcal/mol)"
 
-hyper_params = \
-    {
-    'n_estimators': [500],
-    'max_features': [1/3],
-    'max_depth': [50, 100, 150, 200],
-    'min_samples_split': [2, 5, 10],
-    'min_samples_leaf':[5]
-    }
+hyper_params = {
+    "rf__n_estimators": [400, 500],
+    "rf__max_features": ["sqrt"],
+    "rf__max_depth": [25, 50, 100],
+    "rf__min_samples_split": [2, 5],
+    "rf__min_samples_leaf": [2, 4, 8],
+}
 
+training_path = "/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/"
+targs_df = pd.read_csv(training_path + "dock/new_ChEMBL_docking_df.csv", index_col="ID")
 
-rdkit_desc_path = '/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/desc/rdkit/ChEMBL_rdkit_desc_1.csv.gz'
-mordred_desc_path = '/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/desc/mordred/ChEMBL_mordred_desc_1.csv.gz'
-targets_path = '/users/yhb18174/Recreating_DMTA/datasets/ChEMBL/training_data/dock/ChEMBL_docking_df.csv'
-rdkit_save_path = '/users/yhb18174/Recreating_DMTA/results/rdkit_desc/init_RF_model/it0'
-mordred_save_path = '/users/yhb18174/Recreating_DMTA/results/mordred_desc/init_RF_model/it0'
+# Setting up input targets, removing any ones which failed to dock
+targs = targs_df[["Affinity(kcal/mol)"]]
+falsetargs = targs_df[targs_df["Affinity(kcal/mol)"] == "False"]
+targs = targs.drop(index=falsetargs.index)
 
-rdkit_features = pd.read_csv(rdkit_desc_path, index_col='ID', compression='gzip')
-targets_df = pd.read_csv(targets_path, index_col='ID')
-targets = targets_df['CNN_affinity'].values.ravel()
+feats_df = pd.read_csv(
+    training_path + "desc/rdkit/ChEMBL_rdkit_desc_1.csv.gz",
+    index_col="ID",
+    compression="gzip",
+)
+save_path = "/users/yhb18174/Recreating_DMTA/results/rdkit_desc/init_RF_model/it0"
 
-# rf, params, perf, feats = model.Train_Regressor(search_type=search_type,
-#                                                    scoring=loss_function,
-#                                                    n_resamples=n_resamples,
-#                                                    inner_cv_type=inner_cv_type,
-#                                                    n_splits=n_splits,
-#                                                    test_size=tr_te_split,
-#                                                    test=False,
-#                                                    hyper_params=hyper_params,
-#                                                    features=rdkit_features,
-#                                                    targets=targets,
-#                                                    save_path=rdkit_save_path,
-#                                                    save_final_model=True,
-#                                                    plot_feat_importance=True,
-#                                                    parallelise=True,
-#                                                    batch_size=2)
+same_value_columns = feats_df.columns[~feats_df.apply(lambda col: col.nunique() == 1)]
+new_feat_df = feats_df[same_value_columns]
+new_feat_df = new_feat_df.drop(index=falsetargs.index)
 
+model = RF_model(docking_column=docking_column)
 
-mordred_features = pd.read_csv(mordred_desc_path, index_col='ID')
-
-rf, params, perf, feats = model.Train_Regressor(search_type=search_type,
-                                                   scoring=loss_function,
-                                                   n_resamples=n_resamples,
-                                                   inner_cv_type=inner_cv_type,
-                                                   n_splits=n_splits,
-                                                   test_size=tr_te_split,
-                                                   test=False,
-                                                   hyper_params=hyper_params,
-                                                   features=mordred_features,
-                                                   targets=targets,
-                                                   save_path=mordred_save_path,
-                                                   save_final_model=True,
-                                                   plot_feat_importance=True,
-                                                   parallelise=True,
-                                                   batch_size=2)
+model.Train_Regressor(
+    search_type=search_type,
+    hyper_params=hyper_params,
+    features=new_feat_df,
+    targets=targs,
+    save_path=save_path,
+    save_final_model=True,
+    plot_feat_importance=True,
+)

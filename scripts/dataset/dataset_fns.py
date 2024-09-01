@@ -22,21 +22,22 @@ lg.setLevel(RDLogger.CRITICAL)
 ROOT_DIR = Path(__file__).parent
 
 
-class Dataset_Formatter():
-    def __init__(self,
-                 run_dir: str=str(ROOT_DIR)):
+class Dataset_Formatter:
+    def __init__(self, run_dir: str = str(ROOT_DIR)):
         return
-    
+
         self.run_dir = run_dir
         self.lilly_smi_df = None
 
-    def _process_inchi(self,
-                       mol_type: str,
-                       mol_list: str,
-                       sub_point: int=None,
-                       core: str=None,
-                       keep_core: bool=True):
-        
+    def _process_inchi(
+        self,
+        mol_type: str,
+        mol_list: str,
+        sub_point: int = None,
+        core: str = None,
+        keep_core: bool = True,
+    ):
+
         """
         Description
         -----------
@@ -58,17 +59,30 @@ class Dataset_Formatter():
                                  (only works if keep_core is True, core and sub point are defined)
                 canon_smi_list = List of canonical SMILES strings, determined by RDKit
         """
-        
+
         # Converting all inchis into RDKit mol objects
 
-        if mol_type =='inchi':
-            mol_list = [Chem.MolFromInchi(x) for x in mol_list if Chem.MolFromInchi(x) is not None]
-        elif mol_type == 'smiles':
-            mol_list = [Chem.MolFromSmiles(x) for x in mol_list if Chem.MolFromSmiles(x) is not None]
+        if mol_type == "inchi":
+            mol_list = [
+                Chem.MolFromInchi(x)
+                for x in mol_list
+                if Chem.MolFromInchi(x) is not None
+            ]
+        elif mol_type == "smiles":
+            mol_list = [
+                Chem.MolFromSmiles(x)
+                for x in mol_list
+                if Chem.MolFromSmiles(x) is not None
+            ]
 
         # Canonicalising the SMILES and obtaining the 3 lists produced by the _canonicalise_smiles() function
-        results = [self._canonicalise_smiles(mol, keep_core=True, core_smi=core, sub_point=sub_point) for mol in mol_list]
-        
+        results = [
+            self._canonicalise_smiles(
+                mol, keep_core=True, core_smi=core, sub_point=sub_point
+            )
+            for mol in mol_list
+        ]
+
         # Isolating each output list
         frag_smi_list = [result[1] for result in results if results[0]]
         canon_smi_list = [result[2] for result in results if results[0]]
@@ -76,12 +90,10 @@ class Dataset_Formatter():
         kekulised_smi_ls = [self._kekulise_smiles(mol) for mol in canon_mol_list]
 
         return canon_mol_list, frag_smi_list, canon_smi_list, kekulised_smi_ls
-     
-    def _canonicalise_smiles(self,
-                             mol: object,
-                             keep_core=True,
-                             core_smi: str=None,
-                             sub_point: int=None):
+
+    def _canonicalise_smiles(
+        self, mol: object, keep_core=True, core_smi: str = None, sub_point: int = None
+    ):
         """
         Description
         -----------
@@ -112,7 +124,6 @@ class Dataset_Formatter():
         enumerator = rdMolStandardize.TautomerEnumerator()
         canon_mol = enumerator.Canonicalize(mol)
 
-
         # If maintaining the original core is not an issue then just canonicalise as usual,
         # Does not show fragment SMILES strings
         if not keep_core:
@@ -124,13 +135,13 @@ class Dataset_Formatter():
         # Path to keep ingthe tautomeric form of the original core
         else:
             core_mol = Chem.MolFromSmiles(core_smi)
-            
+
             # Initialising the enumerator, canonicalising the molecule and obtaining all tautomeric
             # forms of the original core
             core_tauts = enumerator.Enumerate(core_mol)
 
             # Setting flag for whether molecules have a one of the tautomeric cores
-            has_core=False
+            has_core = False
 
             # Checking if the mol has the original core
             if canon_mol.HasSubstructMatch(core_mol):
@@ -142,29 +153,31 @@ class Dataset_Formatter():
                 frag_smile = Chem.MolToSmiles(frag_mol)
 
                 return has_core, frag_smile, canon_smi
-            
+
             # If it doesnt have the original core, check the tautomeric forms
             else:
                 for tautomers in core_tauts:
-                    
+
                     # If it has one of the tautometic forms, substitute the core with
                     # a dummy atom
                     if mol.HasSubstructMatch(tautomers):
-                        has_core=True
-                        frag_mol=Chem.ReplaceCore(mol, tautomers)
+                        has_core = True
+                        frag_mol = Chem.ReplaceCore(mol, tautomers)
                         frag_smile = Chem.MolToSmiles(frag_mol)
-                
+
                         # Canonicalise the fragment and specify atom positions
                         canon_frag_mol = enumerator.Canonicalize(frag_mol)
                         frag_atoms = canon_frag_mol.GetAtoms()
 
                         # Find the dummy atom position
                         for atom in frag_atoms:
-                            if atom.GetSymbol() == '*':
-                                
+                            if atom.GetSymbol() == "*":
+
                                 # Find which atom was bonded to the dummy atom
                                 # (which where the original core was bonded)
-                                bonds = canon_frag_mol.GetAtomWithIdx(atom.GetIdx()).GetBonds()
+                                bonds = canon_frag_mol.GetAtomWithIdx(
+                                    atom.GetIdx()
+                                ).GetBonds()
                                 dummy_pos = atom.GetIdx()
 
                                 for bond in bonds:
@@ -184,27 +197,25 @@ class Dataset_Formatter():
                         sub_atom = sub_point + len(frag_atoms) - 1
 
                         # Add single bond
-                        emol_combined.AddBond(neighbour_pos, sub_atom, Chem.rdchem.BondType.SINGLE)
+                        emol_combined.AddBond(
+                            neighbour_pos, sub_atom, Chem.rdchem.BondType.SINGLE
+                        )
                         final_mol = emol_combined.GetMol()
 
                         # Remove the remaining H atoms (required)
                         canon_mol = Chem.RemoveHs(final_mol)
                         canon_smi = Chem.MolToSmiles(canon_mol)
-                        
-                        return has_core, frag_smile, canon_smi
 
+                        return has_core, frag_smile, canon_smi
 
                 # If it still doesnt have the core just return the canonicalised SMILES
                 # string without the core
                 if not has_core:
-                    frag_smile=None
+                    frag_smile = None
                     uncanon_smi = Chem.MolToSmiles(mol)
                     return has_core, frag_smile, uncanon_smi
-       
-    def _adjust_smi_for_ph(self,
-                           smi: str,
-                           ph: float=7.4,
-                           phmodel: str='OpenEye'):
+
+    def _adjust_smi_for_ph(self, smi: str, ph: float = 7.4, phmodel: str = "OpenEye"):
         """
         Description
         -----------
@@ -221,29 +232,28 @@ class Dataset_Formatter():
         SMILES string of adjusted molecule
         """
         # OpenEye pH model needs a pH of 7.4
-        if phmodel == 'OpenEye' and ph != 7.4:
-            raise ValueError('Cannot use OpenEye pH conversion for pH != 7.4')
+        if phmodel == "OpenEye" and ph != 7.4:
+            raise ValueError("Cannot use OpenEye pH conversion for pH != 7.4")
 
         # Use OpenBabel for pH conversion
         # NEED TO PIP INSTALL OBABEL ON phd_env
-        if phmodel == 'OpenBabel':
+        if phmodel == "OpenBabel":
             ob_conv = ob.OBConversion()
             ob_mol = ob.OBMol()
             ob_conv.SetInAndOutFormats("smi", "smi")
             ob_conv.ReadString(ob_mol, smi)
-            ob_mol.AddHydrogens(False, # <- only add polar H
-                                True,  # <- correct for pH
-                                ph)
-            ph_smi = ob_conv.WriteString(ob_mol,
-                                         True) # <- Trim White Space
-            
+            ob_mol.AddHydrogens(
+                False, True, ph  # <- only add polar H  # <- correct for pH
+            )
+            ph_smi = ob_conv.WriteString(ob_mol, True)  # <- Trim White Space
+
             # Check that pH adjusted SMILES can be read by RDKit,
             # if not return original SMILES
             if Chem.MolFromSmiles(ph_smi) is None:
-                ph_smi=smi
+                ph_smi = smi
 
         # Use OpenEye for pH conversion
-        elif phmodel == 'OpenEye':
+        elif phmodel == "OpenEye":
             mol = oechem.OEGraphMol()
             oechem.OESmilesToMol(mol, smi)
             oe.OESetNeutralpHModel(mol)
@@ -255,16 +265,18 @@ class Dataset_Formatter():
         Chem.Kekulize(mol)
         return Chem.MolToSmiles(mol, kekuleSmiles=True)
 
-    def _load_data(self,
-                   mol_dir: str,
-                   filename: str,
-                   mol_type: str,
-                   prefix: str='HW-',
-                   retain_ids: bool=False,
-                   pymolgen: bool=True,
-                   core: str='Cc1noc(C)c1-c1ccccc1',
-                   sub_point: int=None,
-                   keep_core: bool=True):
+    def _load_data(
+        self,
+        mol_dir: str,
+        filename: str,
+        mol_type: str,
+        prefix: str = "HW-",
+        retain_ids: bool = False,
+        pymolgen: bool = True,
+        core: str = "Cc1noc(C)c1-c1ccccc1",
+        sub_point: int = None,
+        keep_core: bool = True,
+    ):
         """
         Description
         -----------
@@ -293,53 +305,61 @@ class Dataset_Formatter():
 
         # If molecules come from PyMolGen then carry out this processing
         if pymolgen:
-            with open(f'{mol_dir}/{filename}', 'r') as file:
+            with open(f"{mol_dir}/{filename}", "r") as file:
                 lines = file.readlines()
-            
+
             # Obtain the InChI list from the exp.inchi files
             inchi_list = [line.strip() for line in lines]
-            
-            # Process the InChIs into their canonical forms
-            canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = self._process_inchi(mol_type=mol_type,
-                                                                                      mol_list=inchi_list,
-                                                                                      sub_point=sub_point,
-                                                                                      core=core,
-                                                                                      keep_core=keep_core)
-            
-        else:
-            mol_df = pd.read_csv(f'{mol_dir}/{filename}')
-            smi_ls = mol_df['SMILES'].tolist()
 
             # Process the InChIs into their canonical forms
-            canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = self._process_inchi(mol_type=mol_type,
-                                                                                      mol_list=smi_ls,
-                                                                                      sub_point=sub_point,
-                                                                                      core=core,
-                                                                                      keep_core=keep_core)
+            canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = self._process_inchi(
+                mol_type=mol_type,
+                mol_list=inchi_list,
+                sub_point=sub_point,
+                core=core,
+                keep_core=keep_core,
+            )
+
+        else:
+            mol_df = pd.read_csv(f"{mol_dir}/{filename}")
+            smi_ls = mol_df["SMILES"].tolist()
+
+            # Process the InChIs into their canonical forms
+            canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = self._process_inchi(
+                mol_type=mol_type,
+                mol_list=smi_ls,
+                sub_point=sub_point,
+                core=core,
+                keep_core=keep_core,
+            )
 
             # Adjust protonation state of canonical molecule at given pH
-            
-        ph_canon_smi_ls = [self._adjust_smi_for_ph(smi, phmodel='OpenEye') for smi in canon_smi_ls]
 
-        id_ls = [f'{prefix}{i+1}' for i in range(len(canon_mol_ls))] if not retain_ids else list(mol_df['ID'])
+        ph_canon_smi_ls = [
+            self._adjust_smi_for_ph(smi, phmodel="OpenEye") for smi in canon_smi_ls
+        ]
 
+        id_ls = (
+            [f"{prefix}{i+1}" for i in range(len(canon_mol_ls))]
+            if not retain_ids
+            else list(mol_df["ID"])
+        )
 
         # Format the data prior to pd.DataFrame entry
         data = {
-            'ID': id_ls,
-            'Mol': canon_mol_ls,
-            'Frag_SMILES': frag_smi_ls,
-            'SMILES': ph_canon_smi_ls,
-            'Kekulised_SMILES': kek_smi_ls
+            "ID": id_ls,
+            "Mol": canon_mol_ls,
+            "Frag_SMILES": frag_smi_ls,
+            "SMILES": ph_canon_smi_ls,
+            "Kekulised_SMILES": kek_smi_ls,
         }
 
         self.smi_df = pd.DataFrame(data)
         self.lilly_smi_df = self.apply_lilly_rules(self.smi_df)
 
         return self.lilly_smi_df
-    
-    def _calculate_oe_LogP(self,
-                           smi: str):
+
+    def _calculate_oe_LogP(self, smi: str):
         """
         Description
         -----------
@@ -359,20 +379,17 @@ class Dataset_Formatter():
 
         # Check is smile gives valid molecule object
         if not oe.OESmilesToMol(mol, smi):
-            print('ERROR: {}'.format(smi))
+            print("ERROR: {}".format(smi))
         else:
             # Calculate logP
             try:
-                logp= oe.OEGetXLogP(mol, atomxlogps=None)
+                logp = oe.OEGetXLogP(mol, atomxlogps=None)
             except RuntimeError:
                 print(smi)
         return logp
 
-    def _get_descriptors(self,
-                            mol,
-                            missingVal=None,
-                            descriptor_set: str='RDKit'):
-    
+    def _get_descriptors(self, mol, missingVal=None, descriptor_set: str = "RDKit"):
+
         """
         Description
         -----------
@@ -396,22 +413,23 @@ class Dataset_Formatter():
 
 
         """
-        
+
         res = {}
-        if descriptor_set =='RDKit':
-            for name,func in Descriptors._descList:
+        if descriptor_set == "RDKit":
+            for name, func in Descriptors._descList:
                 # some of the descriptor fucntions can throw errors if they fail, catch those here:
                 try:
                     val = func(mol)
                 except:
                     # print the error message:
                     import traceback
+
                     traceback.print_exc()
                     # and set the descriptor value to whatever missingVal is
                     val = missingVal
                 res[name] = val
 
-        elif descriptor_set == 'Mordred':
+        elif descriptor_set == "Mordred":
             calc = Calculator(descriptors, ignore_3D=True)
 
             try:
@@ -426,10 +444,10 @@ class Dataset_Formatter():
                     res[str(descriptor)] = missingVal
 
         return res
-    
-    def _calculate_desc_df(self,
-                           df: pd.DataFrame=None,
-                           descriptor_set: str='RDKit'):
+
+    def _calculate_desc_df(
+        self, df: pd.DataFrame = None, descriptor_set: str = "RDKit"
+    ):
         """
         Description
         -----------
@@ -453,7 +471,7 @@ class Dataset_Formatter():
         |____|_____|_____________|________|_________|______|_______|_____|
 
         """
-        
+
         # Setting up temporary df so to not save over self.smi_df
         if df is not None:
             tmp_df = df
@@ -462,36 +480,48 @@ class Dataset_Formatter():
 
         # Getting the descriptors for each mol object and saving the dictionary
         # in a column named descriptors
-        tmp_df['Descriptors'] = tmp_df['Mol'].apply(self._get_descriptors, args=(None, descriptor_set))
+        tmp_df["Descriptors"] = tmp_df["Mol"].apply(
+            self._get_descriptors, args=(None, descriptor_set)
+        )
 
         # Making a new pd.Dataframe with each descriptor as a column, setting the
         # index to match self.smi_df (or tmp_df)
-        if descriptor_set=='RDKit':
-            desc_df = pd.DataFrame(tmp_df['Descriptors'].tolist(), columns=[d[0] for d in Descriptors.descList])
+        if descriptor_set == "RDKit":
+            desc_df = pd.DataFrame(
+                tmp_df["Descriptors"].tolist(),
+                columns=[d[0] for d in Descriptors.descList],
+            )
 
-        elif descriptor_set=='Mordred':
-            calc=Calculator(descriptors, ignore_3D=True)
-            desc_df = pd.DataFrame(tmp_df['Descriptors'].tolist(), columns=[str(d) for d in calc.descriptors])
+        elif descriptor_set == "Mordred":
+            calc = Calculator(descriptors, ignore_3D=True)
+            desc_df = pd.DataFrame(
+                tmp_df["Descriptors"].tolist(),
+                columns=[str(d) for d in calc.descriptors],
+            )
 
-        desc_df['ID'] = tmp_df.index.tolist()
-        desc_df = desc_df.set_index('ID')
+        desc_df["ID"] = tmp_df.index.tolist()
+        desc_df = desc_df.set_index("ID")
 
         # Concatenating the two dfs to give the full set of descriptors and SMILES
-        self.final_df = pd.concat([tmp_df, desc_df], axis=1, join='inner').drop(columns=['Descriptors'])
+        self.final_df = pd.concat([tmp_df, desc_df], axis=1, join="inner").drop(
+            columns=["Descriptors"]
+        )
 
-        if 'nARing' in self.final_df.columns:
-            self.final_df.rename(columns={'nARing': 'NumAromaticRings'}, inplace=True)
-        if 'MW' in self.final_df.columns:
-            self.final_df.rename(columns={'MW': 'MolWt'}, inplace=True)
+        if "nARing" in self.final_df.columns:
+            self.final_df.rename(columns={"nARing": "NumAromaticRings"}, inplace=True)
+        if "MW" in self.final_df.columns:
+            self.final_df.rename(columns={"MW": "MolWt"}, inplace=True)
 
-        self.final_df['oe_logp'] = self.final_df['SMILES'].apply(self._calculate_oe_LogP)
-        self.final_df['PFI'] = self.final_df['NumAromaticRings'] + self.final_df['oe_logp']
+        self.final_df["oe_logp"] = self.final_df["SMILES"].apply(
+            self._calculate_oe_LogP
+        )
+        self.final_df["PFI"] = (
+            self.final_df["NumAromaticRings"] + self.final_df["oe_logp"]
+        )
 
         return self.final_df
 
-    def _conv_df_to_str(self,
-                        df: pd.DataFrame,
-                        **kwargs):
+    def _conv_df_to_str(self, df: pd.DataFrame, **kwargs):
         """
         Description
         -----------
@@ -510,15 +540,17 @@ class Dataset_Formatter():
         string = StringIO()
         df.to_csv(string, **kwargs)
         return string.getvalue()
-    
-    def apply_lilly_rules(self,
-                        df=None,
-                        smiles=[],
-                        smi_input_filename=None,
-                        cleanup=True,
-                        run_in_temp_dir=True,
-                        lilly_rules_script=\
-                        str(ROOT_DIR)+'/Lilly-Medchem-Rules/Lilly_Medchem_Rules.rb'):
+
+    def apply_lilly_rules(
+        self,
+        df=None,
+        smiles=[],
+        smi_input_filename=None,
+        cleanup=True,
+        run_in_temp_dir=True,
+        lilly_rules_script=str(ROOT_DIR)
+        + "/Lilly-Medchem-Rules/Lilly_Medchem_Rules.rb",
+    ):
         """
         Apply Lilly rules to SMILES in a list or a DataFrame.
 
@@ -543,79 +575,77 @@ class Dataset_Formatter():
         2     CCCCC(=O)OCC        CCCCC(=O)OCC              True  D(75) ester:no_rings:C4        CCCCC(=O)OCC
         3  c1ccccc1CC(=O)C  CC(=O)CC1=CC=CC=C1              True                     None  CC(=O)CC1=CC=CC=C1
         """
-        
+
         lilly_rules_script_path = Path(lilly_rules_script)
 
         if not lilly_rules_script_path.is_file():
-            raise FileNotFoundError(f"Cannot find Lilly rules script (Lilly_Medchem_Rules.rb) at: {lilly_rules_script_path}")
-                
-        smi_file_txt = self._conv_df_to_str(df[['Kekulised_SMILES', 'ID']],
-                                    sep=' ',
-                                    header=False,
-                                    index=False)
+            raise FileNotFoundError(
+                f"Cannot find Lilly rules script (Lilly_Medchem_Rules.rb) at: {lilly_rules_script_path}"
+            )
+
+        smi_file_txt = self._conv_df_to_str(
+            df[["Kekulised_SMILES", "ID"]], sep=" ", header=False, index=False
+        )
         # Optionally set up temporary directory:
         if run_in_temp_dir:
             temp_dir = tempfile.TemporaryDirectory()
-            run_dir = temp_dir.name + '/'
+            run_dir = temp_dir.name + "/"
         else:
-            run_dir = './'
+            run_dir = "./"
 
         # If filename given, save SMILES to this file:
         if smi_input_filename is not None:
-            with open(run_dir+smi_input_filename, 'w') as temp:
+            with open(run_dir + smi_input_filename, "w") as temp:
                 temp.write(smi_file_txt)
 
         # If no filename given just use a temporary file:
         else:
             # Lilly rules script reads the file suffix so needs to be .smi:
-            temp = tempfile.NamedTemporaryFile(mode="w+", 
-                                            suffix=".smi", 
-                                            dir=run_dir)
+            temp = tempfile.NamedTemporaryFile(mode="w+", suffix=".smi", dir=run_dir)
             temp.write(smi_file_txt)
             # Go to start of file:
             temp.seek(0)
 
         # Run Lilly rules script
-        lilly_results = \
-                subprocess.run([f'cd {run_dir}; ruby {lilly_rules_script} {temp.name}'], 
-                    shell=True, 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.PIPE)
+        lilly_results = subprocess.run(
+            [f"cd {run_dir}; ruby {lilly_rules_script} {temp.name}"],
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
-        if lilly_results.stderr.decode('utf-8') != '':
-            print('WARNING: {}'.format(lilly_results.stderr.decode('utf-8'))) 
-        lilly_results = lilly_results.stdout.decode('utf-8')
+        if lilly_results.stderr.decode("utf-8") != "":
+            print("WARNING: {}".format(lilly_results.stderr.decode("utf-8")))
+        lilly_results = lilly_results.stdout.decode("utf-8")
 
         # Process results:
         passes = []
-        if lilly_results != '':
-            for line in lilly_results.strip().split('\n'):
+        if lilly_results != "":
+            for line in lilly_results.strip().split("\n"):
 
                 # Record warning if given:
-                if ' : ' in line:
-                    smiles_molid, warning = line.split(' : ')
+                if " : " in line:
+                    smiles_molid, warning = line.split(" : ")
                 else:
                     smiles_molid = line.strip()
                     warning = None
-                smiles, molid = smiles_molid.split(' ')
+                smiles, molid = smiles_molid.split(" ")
                 passes.append([molid, warning, smiles])
 
         # Get reasons for failures:
         failures = []
 
-
-        #Maybe change 'r' to 'w+'
-        for bad_filename in glob.glob(run_dir+'bad*.smi'):
-            with open(bad_filename, 'r') as bad_file:
+        # Maybe change 'r' to 'w+'
+        for bad_filename in glob.glob(run_dir + "bad*.smi"):
+            with open(bad_filename, "r") as bad_file:
 
                 for line in bad_file.readlines():
-                    line = line.split(' ')
+                    line = line.split(" ")
                     smiles = line[0]
                     molid = line[1]
-                    warning = ' '.join(line[2:]).strip(': \n')
+                    warning = " ".join(line[2:]).strip(": \n")
                     failures.append([molid, warning, smiles])
                 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
-
 
         # Close and remove tempfile:
         # (Do this even if run in a temporary directory to prevent warning when
@@ -626,43 +656,47 @@ class Dataset_Formatter():
         if run_in_temp_dir:
             temp_dir.cleanup()
         elif cleanup:
-            subprocess.run(['rm -f ok{0,1,2,3}.log bad{0,1,2,3}.smi'], shell=True)
+            subprocess.run(["rm -f ok{0,1,2,3}.log bad{0,1,2,3}.smi"], shell=True)
 
         # Convert to DataFrame:
-        df_passes = pd.DataFrame(passes, 
-                                columns=['ID', 
-                                        'Lilly_rules_warning', 
-                                        'Lilly_rules_SMILES'])
+        df_passes = pd.DataFrame(
+            passes, columns=["ID", "Lilly_rules_warning", "Lilly_rules_SMILES"]
+        )
         #                .set_index('ID', verify_integrity=True)
-        df_passes.insert(0, 'Lilly_rules_pass', True)
+        df_passes.insert(0, "Lilly_rules_pass", True)
 
-        df_failures = pd.DataFrame(failures, 
-                                columns=['ID', 
-                                            'Lilly_rules_warning', 
-                                            'Lilly_rules_SMILES'])
+        df_failures = pd.DataFrame(
+            failures, columns=["ID", "Lilly_rules_warning", "Lilly_rules_SMILES"]
+        )
         #                .set_index('ID', verify_integrity=True)
-        df_failures.insert(0, 'Lilly_rules_pass', False)
+        df_failures.insert(0, "Lilly_rules_pass", False)
 
-        df_all = pd.concat([df_passes, df_failures], axis=0)       
+        df_all = pd.concat([df_passes, df_failures], axis=0)
 
-        df_out = pd.merge(df, df_all, on='ID', how='inner')
+        df_out = pd.merge(df, df_all, on="ID", how="inner")
 
         # Check all molecules accounted for:
         if len(df_out) != len(df):
-            raise ValueError('Some compounds missing, {} molecules input, but {} compounds output.'.format(len(df), len(df_out)))
+            raise ValueError(
+                "Some compounds missing, {} molecules input, but {} compounds output.".format(
+                    len(df), len(df_out)
+                )
+            )
 
-        #df['Lilly_rules_pass'].fillna(False, inplace=True)
+        # df['Lilly_rules_pass'].fillna(False, inplace=True)
 
-        return df_out.set_index('ID')
+        return df_out.set_index("ID")
 
-    def _filter_df(self,
-                   mw_budget: int=600,
-                   n_arom_rings_limit: int=3,
-                   PFI_limit: int=8,
-                   remove_3_membered_rings: bool=True,
-                   remove_4_membered_rings: bool=True,
-                   max_fused_ring_count: int=1,
-                   pass_lilly_rules: bool=True):
+    def _filter_df(
+        self,
+        mw_budget: int = 600,
+        n_arom_rings_limit: int = 3,
+        PFI_limit: int = 8,
+        remove_3_membered_rings: bool = True,
+        remove_4_membered_rings: bool = True,
+        max_fused_ring_count: int = 1,
+        pass_lilly_rules: bool = True,
+    ):
         """
         Description
         -----------
@@ -683,25 +717,31 @@ class Dataset_Formatter():
         filtered off with the specified filters
 
         """
-        
+
         # Obtaining all molecules which pass the defined filters
-        all_passing_mols = self.final_df[(self.final_df['MolWt'] <= mw_budget) &
-                              (self.final_df['NumAromaticRings'] <= n_arom_rings_limit) &
-                              #(batch_df['PFI'] <= PFI_limit) &
-                              (self.final_df['Lilly_rules_pass'] == pass_lilly_rules)]
-                              #(batch_df['max_fused_rings'] == max_fused_ring_count)
-                                
-        
+        all_passing_mols = self.final_df[
+            (self.final_df["MolWt"] <= mw_budget)
+            & (self.final_df["NumAromaticRings"] <= n_arom_rings_limit)
+            &
+            # (batch_df['PFI'] <= PFI_limit) &
+            (self.final_df["Lilly_rules_pass"] == pass_lilly_rules)
+        ]
+        # (batch_df['max_fused_rings'] == max_fused_ring_count)
+
         filtered_smi = []
 
         for index, rows in all_passing_mols.iterrows():
-            for mol in rows['Mol'].GetRingInfo().AtomRings():
-                if (remove_3_membered_rings and len(mol) == 3) or (remove_4_membered_rings and len(mol) == 4):
-                        filtered_smi.append(rows['SMILES'])
+            for mol in rows["Mol"].GetRingInfo().AtomRings():
+                if (remove_3_membered_rings and len(mol) == 3) or (
+                    remove_4_membered_rings and len(mol) == 4
+                ):
+                    filtered_smi.append(rows["SMILES"])
 
-        self.filtered_results = all_passing_mols[~self.final_df['SMILES'].isin(filtered_smi)]
-        
-        columns_to_drop = ['Mol']
+        self.filtered_results = all_passing_mols[
+            ~self.final_df["SMILES"].isin(filtered_smi)
+        ]
+
+        columns_to_drop = ["Mol"]
 
         # for column in self.filtered_results.columns:
         #     if column == 'Lilly_rules_pass':
@@ -715,12 +755,14 @@ class Dataset_Formatter():
         self.filtered_results.drop(columns=columns_to_drop, inplace=True)
         return self.filtered_results
 
-    def _make_chunks(self,
-                     df: pd.DataFrame,
-                     chunksize: int,
-                     save_data: bool=False,
-                     save_path: str=None,
-                     filename: str=None,):
+    def _make_chunks(
+        self,
+        df: pd.DataFrame,
+        chunksize: int,
+        save_data: bool = False,
+        save_path: str = None,
+        filename: str = None,
+    ):
         """
         Description
         -----------
@@ -739,30 +781,36 @@ class Dataset_Formatter():
         Print statements to show which chunk is being saved and where, and a list of the chunks
         """
 
-        chunks = [df.iloc[i: i + chunksize] for i in range(0, df.shape[0], chunksize)]
+        chunks = [df.iloc[i : i + chunksize] for i in range(0, df.shape[0], chunksize)]
 
         for i, chunk in enumerate(chunks):
-            print(f'Saving chunk {i} to:\n{save_path}{filename}')
+            print(f"Saving chunk {i} to:\n{save_path}{filename}")
             if save_data:
-                chunk.to_csv(f'{save_path}{filename}_{i+1}.csv.gz', compression='gzip', index='ID')
+                chunk.to_csv(
+                    f"{save_path}{filename}_{i+1}.csv.gz",
+                    compression="gzip",
+                    index="ID",
+                )
 
         return chunks
-    
-    def FormatData(self,
-                   mol_dir: str,
-                   mol_filename: str,
-                   mol_type: str,
-                   prefix: str,
-                   retain_ids: bool,
-                   pymolgen: bool,
-                   save_data:bool,
-                   save_path: str=None,
-                   save_chunk_filename: str=None,
-                   chunksize: int=10000,
-                   core: str='Cc1noc(C)c1-c1ccccc1',
-                   sub_point: int=None,
-                   keep_core: bool=True,
-                   descriptor_set: str='RDKit'):
+
+    def FormatData(
+        self,
+        mol_dir: str,
+        mol_filename: str,
+        mol_type: str,
+        prefix: str,
+        retain_ids: bool,
+        pymolgen: bool,
+        save_data: bool,
+        save_path: str = None,
+        save_chunk_filename: str = None,
+        chunksize: int = 10000,
+        core: str = "Cc1noc(C)c1-c1ccccc1",
+        sub_point: int = None,
+        keep_core: bool = True,
+        descriptor_set: str = "RDKit",
+    ):
         """
         Description
         -----------
@@ -784,101 +832,112 @@ class Dataset_Formatter():
         keep_core (bool)                Flag to keep original tautomer of core in the structure
         descriptor_set (str)            Descriptor set used as the descriptors
         """
-        
-        self._load_data(mol_dir=mol_dir,
-                        mol_type=mol_type,
-                      filename=mol_filename,
-                      prefix=prefix,
-                      retain_ids=retain_ids,
-                      pymolgen=pymolgen,
-                      core=core,
-                      sub_point=sub_point,
-                      keep_core=keep_core)
-        print('Data Loaded')
 
-        self._calculate_desc_df(df=self.lilly_smi_df,
-                                descriptor_set=descriptor_set)
-        
-        print('Descriptors Calculated')
+        self._load_data(
+            mol_dir=mol_dir,
+            mol_type=mol_type,
+            filename=mol_filename,
+            prefix=prefix,
+            retain_ids=retain_ids,
+            pymolgen=pymolgen,
+            core=core,
+            sub_point=sub_point,
+            keep_core=keep_core,
+        )
+        print("Data Loaded")
+
+        self._calculate_desc_df(df=self.lilly_smi_df, descriptor_set=descriptor_set)
+
+        print("Descriptors Calculated")
 
         self._filter_df()
 
-        print('Data Frame Filtered')
-        
+        print("Data Frame Filtered")
 
-        self._make_chunks(df=self.filtered_results,
-                        chunksize=chunksize,
-                        save_data=save_data,
-                        save_path=save_path,
-                        filename=save_chunk_filename)
+        self._make_chunks(
+            df=self.filtered_results,
+            chunksize=chunksize,
+            save_data=save_data,
+            save_path=save_path,
+            filename=save_chunk_filename,
+        )
 
-class mp_Dataset_Formatter():
-    def __init__(self,
-                 n_processes: int=None):
-        
+
+class mp_Dataset_Formatter:
+    def __init__(self, n_processes: int = None):
+
         if n_processes is None:
-            self.cpu_count=cpu_count()
+            self.cpu_count = cpu_count()
         else:
-            self.cpu_count=2
+            self.cpu_count = 2
 
-    def _process_line(self,
-                        line):
+    def _process_line(self, line):
         mol = Chem.MolFromInchi(line.strip())
         if mol is not None:
             return Chem.MolToSmiles(mol)
         else:
             return None
 
-    def _make_chunks1(self,
-                     mol_dir: str,
-                     filename: str,
-                     retain_ids: bool,
-                     pymolgen: bool=False,
-                     prefix: str='HW-',
-                     chunksize:int=100000):
-        print('Making Chunks')
+    def _make_chunks1(
+        self,
+        mol_dir: str,
+        filename: str,
+        retain_ids: bool,
+        pymolgen: bool = False,
+        prefix: str = "HW-",
+        chunksize: int = 100000,
+    ):
+        print("Making Chunks")
         if pymolgen:
-            with open(f'{mol_dir}/{filename}', 'r') as file:
+            with open(f"{mol_dir}/{filename}", "r") as file:
                 lines = file.readlines()
-                print('File open')
+                print("File open")
             mol_ls = [Chem.MolFromInchi(line.strip()) for line in lines]
-            print('Mol List obtained')
+            print("Mol List obtained")
             smi_ls = [Chem.MolToSmiles(mol) for mol in mol_ls]
-            print('SMILES List obtained')
+            print("SMILES List obtained")
 
-            id_ls = [f'{prefix}{i+1}' for i in range(len(smi_ls))]
+            id_ls = [f"{prefix}{i+1}" for i in range(len(smi_ls))]
 
         else:
             mol_df = pd.read_csv(mol_dir + filename)
-            smi_ls = mol_df['SMILES'].tolist()
-            id_ls = mol_df['ID'].tolist() if retain_ids else [f'{prefix}{i+1}' for i in range(len(smi_ls))]
+            smi_ls = mol_df["SMILES"].tolist()
+            id_ls = (
+                mol_df["ID"].tolist()
+                if retain_ids
+                else [f"{prefix}{i+1}" for i in range(len(smi_ls))]
+            )
 
         df = pd.DataFrame()
-        df['ID'] = id_ls
-        df['SMILES'] = smi_ls
-        df.set_index('ID', inplace=True)
+        df["ID"] = id_ls
+        df["SMILES"] = smi_ls
+        df.set_index("ID", inplace=True)
 
-        chunks= [df[i:i + chunksize] for i in range(0, len(df), chunksize)]            
-        print(f'Made {len(chunks)} chunks')
+        chunks = [df[i : i + chunksize] for i in range(0, len(df), chunksize)]
+        print(f"Made {len(chunks)} chunks")
         return chunks
 
-    def _make_chunks(self,
-                     mol_dir: str,
-                     filename: str,
-                     retain_ids: bool,
-                     pymolgen: bool=False,
-                     prefix: str='HW-',
-                     chunksize:int=100000):
-        print('Making Chunks')
+    def _make_chunks(
+        self,
+        mol_dir: str,
+        filename: str,
+        retain_ids: bool,
+        pymolgen: bool = False,
+        prefix: str = "HW-",
+        chunksize: int = 100000,
+    ):
+        print("Making Chunks")
 
-        chunks=[]
-        
+        chunks = []
+
         if pymolgen:
-            with open(f'{mol_dir}/{filename}', 'r') as file:
+            with open(f"{mol_dir}/{filename}", "r") as file:
                 lines = file.readlines()
-                print('File open')
+                print("File open")
 
-            lines_chunks = [lines[i:i+chunksize] for i in range(0, len(lines), chunksize)]
+            lines_chunks = [
+                lines[i : i + chunksize] for i in range(0, len(lines), chunksize)
+            ]
 
             for chunk_idx, chunk_lines in enumerate(lines_chunks):
                 chunk_results = []
@@ -888,42 +947,46 @@ class mp_Dataset_Formatter():
                     result = self._process_line(line)
                     if result is not None:
                         chunk_results.append(result)
-                        id_ls.append(f'{prefix}{len(chunk_results)}')
+                        id_ls.append(f"{prefix}{len(chunk_results)}")
 
-                chunk_df = pd.DataFrame({'ID': id_ls,
-                                         'SMILES': chunk_results})
-                chunk_df.set_index('ID', inplace=True)
-                chunks.append(chunk_df)                
-                print(f'Chunk {chunk_idx + 1} made ({len(chunk_df)} lines)...')
+                chunk_df = pd.DataFrame({"ID": id_ls, "SMILES": chunk_results})
+                chunk_df.set_index("ID", inplace=True)
+                chunks.append(chunk_df)
+                print(f"Chunk {chunk_idx + 1} made ({len(chunk_df)} lines)...")
 
         else:
             mol_df = pd.read_csv(mol_dir + filename)
-            smi_ls = mol_df['SMILES'].tolist()
-            id_ls = mol_df['ID'].tolist() if retain_ids else [f'{prefix}{i+1}' for i in range(len(smi_ls))]
+            smi_ls = mol_df["SMILES"].tolist()
+            id_ls = (
+                mol_df["ID"].tolist()
+                if retain_ids
+                else [f"{prefix}{i+1}" for i in range(len(smi_ls))]
+            )
 
             for i in range(0, len(smi_ls), chunksize):
-                chunk_smi_ls = smi_ls[i:i + chunksize]
-                chunk_id_ls = id_ls[i:i + chunksize]
-                chunk_df = pd.DataFrame({'ID': chunk_id_ls, 'SMILES': chunk_smi_ls})
-                chunk_df.set_index('ID', inplace=True)
-                chunks.append(chunk_df)     
-        
-        print(f'Made {len(chunks)} chunks')
-        
+                chunk_smi_ls = smi_ls[i : i + chunksize]
+                chunk_id_ls = id_ls[i : i + chunksize]
+                chunk_df = pd.DataFrame({"ID": chunk_id_ls, "SMILES": chunk_smi_ls})
+                chunk_df.set_index("ID", inplace=True)
+                chunks.append(chunk_df)
+
+        print(f"Made {len(chunks)} chunks")
+
         return chunks
 
-    def _make_chunks_wrapper(self,
-                             args):
+    def _make_chunks_wrapper(self, args):
         return self._make_chunks(*args)
 
-    def _process_mols(self,
-                        mol_type: str,
-                        mol_list: str,
-                        sub_point: int=None,
-                        core: str=None,
-                        keep_core: bool=True):
-            
-            """
+    def _process_mols(
+        self,
+        mol_type: str,
+        mol_list: str,
+        sub_point: int = None,
+        core: str = None,
+        keep_core: bool = True,
+    ):
+
+        """
             Description
             -----------
             Function that takes a list of inchis and canonicalises them
@@ -944,34 +1007,44 @@ class mp_Dataset_Formatter():
                                     (only works if keep_core is True, core and sub point are defined)
                     canon_smi_list = List of canonical SMILES strings, determined by RDKit
             """
-            
-            # Converting all inchis into RDKit mol objects
 
-            if mol_type =='inchi':
-                mol_list = [Chem.MolFromInchi(x) for x in mol_list if Chem.MolFromInchi(x) is not None]
-            elif mol_type == 'smiles':
-                mol_list = [Chem.MolFromSmiles(x) for x in mol_list if Chem.MolFromSmiles(x) is not None]
+        # Converting all inchis into RDKit mol objects
 
-            # Canonicalising the SMILES and obtaining the 3 lists produced by the _canonicalise_smiles() function
-            results = [self._canonicalise_smiles(mol, keep_core=keep_core, core_smi=core, sub_point=sub_point) for mol in mol_list]
-            
-            # Isolating each output list
-            frag_smi_list = [result[1] for result in results if results[0]]
-            canon_smi_list = [result[2] for result in results if results[0]]
-            canon_mol_list =  [result[3] for result in results if results[0]]
-            kekulised_smi_ls = [self._kekulise_smiles(mol) for mol in canon_mol_list]
+        if mol_type == "inchi":
+            mol_list = [
+                Chem.MolFromInchi(x)
+                for x in mol_list
+                if Chem.MolFromInchi(x) is not None
+            ]
+        elif mol_type == "smiles":
+            mol_list = [
+                Chem.MolFromSmiles(x)
+                for x in mol_list
+                if Chem.MolFromSmiles(x) is not None
+            ]
 
-            return canon_mol_list, frag_smi_list, canon_smi_list, kekulised_smi_ls
+        # Canonicalising the SMILES and obtaining the 3 lists produced by the _canonicalise_smiles() function
+        results = [
+            self._canonicalise_smiles(
+                mol, keep_core=keep_core, core_smi=core, sub_point=sub_point
+            )
+            for mol in mol_list
+        ]
 
-    def _process_mols_wrapper(self,
-                              args):
+        # Isolating each output list
+        frag_smi_list = [result[1] for result in results if results[0]]
+        canon_smi_list = [result[2] for result in results if results[0]]
+        canon_mol_list = [result[3] for result in results if results[0]]
+        kekulised_smi_ls = [self._kekulise_smiles(mol) for mol in canon_mol_list]
+
+        return canon_mol_list, frag_smi_list, canon_smi_list, kekulised_smi_ls
+
+    def _process_mols_wrapper(self, args):
         return self._process_mols(*args)
 
-    def _canonicalise_smiles(self,
-                             mol: object,
-                             keep_core=True,
-                             core_smi: str=None,
-                             sub_point: int=None):
+    def _canonicalise_smiles(
+        self, mol: object, keep_core=True, core_smi: str = None, sub_point: int = None
+    ):
         """
         Description
         -----------
@@ -1007,16 +1080,15 @@ class mp_Dataset_Formatter():
         # Does not show fragment SMILES strings
         if not keep_core:
             return True, None, canon_smi, canon_mol
-        
+
         if core_smi is None:
             raise ValueError("Invalid core SMILES string provided.")
 
-        core_mol = Chem.MolFromSmiles(core_smi)        
-            
+        core_mol = Chem.MolFromSmiles(core_smi)
+
         # Initialising the enumerator, canonicalising the molecule and obtaining all tautomeric
         # forms of the original core
         core_tauts = enumerator.Enumerate(core_mol)
-
 
         # Checking if the mol has the original core
         if canon_mol.HasSubstructMatch(core_mol):
@@ -1025,17 +1097,23 @@ class mp_Dataset_Formatter():
             frag_smile = Chem.MolToSmiles(frag_mol)
 
             return True, frag_smile, canon_smi, canon_mol
-            
+
         # If it doesnt have the original core, check the tautomeric forms
         for taut in core_tauts:
-            
+
             # If it has one of the tautometic forms, substitute the core with
             # a dummy atom
             if canon_mol.HasSubstructMatch(taut):
-                frag_mol=Chem.ReplaceCore(mol, taut)
-                dummy_idx = next(atom.GetIdx() for atom in frag_mol.GetAtoms() is atom.GeySymbol() == '*')
-                neighbour_idx = next(bond.GetOtherAtomIdx(dummy_idx) for bond in frag_mol.GetAtomWithIdx(dummy_idx).GetBonds())
-                
+                frag_mol = Chem.ReplaceCore(mol, taut)
+                dummy_idx = next(
+                    atom.GetIdx()
+                    for atom in frag_mol.GetAtoms() is atom.GeySymbol() == "*"
+                )
+                neighbour_idx = next(
+                    bond.GetOtherAtomIdx(dummy_idx)
+                    for bond in frag_mol.GetAtomWithIdx(dummy_idx).GetBonds()
+                )
+
                 frag_mol = Chem.EditableMol(frag_mol)
                 frag_mol.RemoveAtom(dummy_idx)
                 frag_mol = frag_mol.GetMol()
@@ -1045,17 +1123,15 @@ class mp_Dataset_Formatter():
                 combined_mol = Chem.EditableMole(combined_mol)
                 sub_atom = sub_point + frag_mol.GetNumAtoms() - 1
 
-                combined_mol.AddBond*neighbour_idx, sub_atom, Chem.rdchem.BondType.SINGLE
+                combined_mol.AddBond * neighbour_idx, sub_atom, Chem.rdchem.BondType.SINGLE
                 final_mol = Chem.RemoveHs(combined_mol.GetMol())
                 final_smi = Chem.MolToSmiles(final_mol)
 
                 return True, frag_smi, final_smi, final_mol
 
         return False, None, canon_smi, canon_mol
-    def _adjust_smi_for_ph(self,
-                           smi: str,
-                           ph: float=7.4,
-                           phmodel: str='OpenEye'):
+
+    def _adjust_smi_for_ph(self, smi: str, ph: float = 7.4, phmodel: str = "OpenEye"):
         """
         Description
         -----------
@@ -1072,29 +1148,28 @@ class mp_Dataset_Formatter():
         SMILES string of adjusted molecule
         """
         # OpenEye pH model needs a pH of 7.4
-        if phmodel == 'OpenEye' and ph != 7.4:
-            raise ValueError('Cannot use OpenEye pH conversion for pH != 7.4')
+        if phmodel == "OpenEye" and ph != 7.4:
+            raise ValueError("Cannot use OpenEye pH conversion for pH != 7.4")
 
         # Use OpenBabel for pH conversion
         # NEED TO PIP INSTALL OBABEL ON phd_env
-        if phmodel == 'OpenBabel':
+        if phmodel == "OpenBabel":
             ob_conv = ob.OBConversion()
             ob_mol = ob.OBMol()
             ob_conv.SetInAndOutFormats("smi", "smi")
             ob_conv.ReadString(ob_mol, smi)
-            ob_mol.AddHydrogens(False, # <- only add polar H
-                                True,  # <- correct for pH
-                                ph)
-            ph_smi = ob_conv.WriteString(ob_mol,
-                                         True) # <- Trim White Space
-            
+            ob_mol.AddHydrogens(
+                False, True, ph  # <- only add polar H  # <- correct for pH
+            )
+            ph_smi = ob_conv.WriteString(ob_mol, True)  # <- Trim White Space
+
             # Check that pH adjusted SMILES can be read by RDKit,
             # if not return original SMILES
             if Chem.MolFromSmiles(ph_smi) is None:
-                ph_smi=smi
+                ph_smi = smi
 
         # Use OpenEye for pH conversion
-        elif phmodel == 'OpenEye':
+        elif phmodel == "OpenEye":
             mol = oechem.OEGraphMol()
             oechem.OESmilesToMol(mol, smi)
             oe.OESetNeutralpHModel(mol)
@@ -1105,10 +1180,8 @@ class mp_Dataset_Formatter():
     def _kekulise_smiles(self, mol):
         Chem.Kekulize(mol)
         return Chem.MolToSmiles(mol, kekuleSmiles=True)
-    
-    def _conv_df_to_str(self,
-                        df: pd.DataFrame,
-                        **kwargs):
+
+    def _conv_df_to_str(self, df: pd.DataFrame, **kwargs):
         """
         Description
         -----------
@@ -1127,15 +1200,17 @@ class mp_Dataset_Formatter():
         string = StringIO()
         df.to_csv(string, **kwargs)
         return string.getvalue()
-    
-    def _apply_lilly_rules(self,
-                        df=None,
-                        smiles=[],
-                        smi_input_filename=None,
-                        cleanup=True,
-                        run_in_temp_dir=True,
-                        lilly_rules_script=\
-                        str(ROOT_DIR)+'/Lilly-Medchem-Rules/Lilly_Medchem_Rules.rb'):
+
+    def _apply_lilly_rules(
+        self,
+        df=None,
+        smiles=[],
+        smi_input_filename=None,
+        cleanup=True,
+        run_in_temp_dir=True,
+        lilly_rules_script=str(ROOT_DIR)
+        + "/Lilly-Medchem-Rules/Lilly_Medchem_Rules.rb",
+    ):
         """
         Apply Lilly rules to SMILES in a list or a DataFrame.
 
@@ -1160,74 +1235,74 @@ class mp_Dataset_Formatter():
         2     CCCCC(=O)OCC        CCCCC(=O)OCC              True  D(75) ester:no_rings:C4        CCCCC(=O)OCC
         3  c1ccccc1CC(=O)C  CC(=O)CC1=CC=CC=C1              True                     None  CC(=O)CC1=CC=CC=C1
         """
-        
+
         lilly_rules_script_path = Path(lilly_rules_script)
 
         if not lilly_rules_script_path.is_file():
-            raise FileNotFoundError(f"Cannot find Lilly rules script (Lilly_Medchem_Rules.rb) at: {lilly_rules_script_path}")
-                
-        smi_file_txt = self._conv_df_to_str(df[['Kekulised_SMILES', 'ID']],
-                                    sep=' ',
-                                    header=False,
-                                    index=False)
+            raise FileNotFoundError(
+                f"Cannot find Lilly rules script (Lilly_Medchem_Rules.rb) at: {lilly_rules_script_path}"
+            )
+
+        smi_file_txt = self._conv_df_to_str(
+            df[["Kekulised_SMILES", "ID"]], sep=" ", header=False, index=False
+        )
         # Optionally set up temporary directory:
         if run_in_temp_dir:
             temp_dir = tempfile.TemporaryDirectory()
-            run_dir = temp_dir.name + '/'
+            run_dir = temp_dir.name + "/"
         else:
-            run_dir = './'
+            run_dir = "./"
 
         # If filename given, save SMILES to this file:
         if smi_input_filename is not None:
-            with open(run_dir+smi_input_filename, 'w') as temp:
+            with open(run_dir + smi_input_filename, "w") as temp:
                 temp.write(smi_file_txt)
 
         # If no filename given just use a temporary file:
         else:
             # Lilly rules script reads the file suffix so needs to be .smi:
-            temp = tempfile.NamedTemporaryFile(mode="w+", 
-                                            suffix=".smi", 
-                                            dir=run_dir)
+            temp = tempfile.NamedTemporaryFile(mode="w+", suffix=".smi", dir=run_dir)
             temp.write(smi_file_txt)
             # Go to start of file:
             temp.seek(0)
 
         # Run Lilly rules script
-        lilly_results = \
-                subprocess.run([f'cd {run_dir}; ruby {lilly_rules_script} {temp.name}'], 
-                    shell=True, 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.PIPE)
+        lilly_results = subprocess.run(
+            [f"cd {run_dir}; ruby {lilly_rules_script} {temp.name}"],
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
-        if lilly_results.stderr.decode('utf-8') != '':
-            print('WARNING: {}'.format(lilly_results.stderr.decode('utf-8'))) 
-        lilly_results = lilly_results.stdout.decode('utf-8')
+        if lilly_results.stderr.decode("utf-8") != "":
+            print("WARNING: {}".format(lilly_results.stderr.decode("utf-8")))
+        lilly_results = lilly_results.stdout.decode("utf-8")
 
         # Process results:
         passes = []
-        if lilly_results != '':
-            for line in lilly_results.strip().split('\n'):
+        if lilly_results != "":
+            for line in lilly_results.strip().split("\n"):
 
                 # Record warning if given:
-                if ' : ' in line:
-                    smiles_molid, warning = line.split(' : ')
+                if " : " in line:
+                    smiles_molid, warning = line.split(" : ")
                 else:
                     smiles_molid = line.strip()
                     warning = None
-                smiles, molid = smiles_molid.split(' ')
+                smiles, molid = smiles_molid.split(" ")
                 passes.append([molid, warning, smiles])
 
         # Get reasons for failures:
         failures = []
 
-        #Maybe change 'r' to 'w+'
-        for bad_filename in glob.glob(run_dir+'bad*.smi'):
-            with open(bad_filename, 'r') as bad_file:
+        # Maybe change 'r' to 'w+'
+        for bad_filename in glob.glob(run_dir + "bad*.smi"):
+            with open(bad_filename, "r") as bad_file:
                 for line in bad_file.readlines():
-                    line = line.split(' ')
+                    line = line.split(" ")
                     smiles = line[0]
                     molid = line[1]
-                    warning = ' '.join(line[2:]).strip(': \n')
+                    warning = " ".join(line[2:]).strip(": \n")
                     failures.append([molid, warning, smiles])
 
         # Close and remove tempfile:
@@ -1239,89 +1314,103 @@ class mp_Dataset_Formatter():
         if run_in_temp_dir:
             temp_dir.cleanup()
         elif cleanup:
-            subprocess.run(['rm -f ok{0,1,2,3}.log bad{0,1,2,3}.smi'], shell=True)
+            subprocess.run(["rm -f ok{0,1,2,3}.log bad{0,1,2,3}.smi"], shell=True)
 
         # Convert to DataFrame:
-        df_passes = pd.DataFrame(passes, 
-                                columns=['ID', 
-                                        'Lilly_rules_warning', 
-                                        'Lilly_rules_SMILES'])
+        df_passes = pd.DataFrame(
+            passes, columns=["ID", "Lilly_rules_warning", "Lilly_rules_SMILES"]
+        )
         #                .set_index('ID', verify_integrity=True)
-        df_passes.insert(0, 'Lilly_rules_pass', True)
+        df_passes.insert(0, "Lilly_rules_pass", True)
 
-        df_failures = pd.DataFrame(failures, 
-                                columns=['ID', 
-                                            'Lilly_rules_warning', 
-                                            'Lilly_rules_SMILES'])
+        df_failures = pd.DataFrame(
+            failures, columns=["ID", "Lilly_rules_warning", "Lilly_rules_SMILES"]
+        )
         #                .set_index('ID', verify_integrity=True)
 
-        df_failures.insert(0, 'Lilly_rules_pass', False)
+        df_failures.insert(0, "Lilly_rules_pass", False)
 
-        df_all = pd.concat([df_passes, df_failures], axis=0)  
+        df_all = pd.concat([df_passes, df_failures], axis=0)
 
-        df_out = pd.merge(df, df_all, on='ID', how='inner')
+        df_out = pd.merge(df, df_all, on="ID", how="inner")
 
-        print(df[~df['ID'].isin(df_out['ID'])])
+        print(df[~df["ID"].isin(df_out["ID"])])
 
         # Check all molecules accounted for:
         if len(df_out) != len(df):
-            raise ValueError('Some compounds missing, {} molecules input, but {} compounds output.'.format(len(df), len(df_out)))
+            raise ValueError(
+                "Some compounds missing, {} molecules input, but {} compounds output.".format(
+                    len(df), len(df_out)
+                )
+            )
 
-        #df['Lilly_rules_pass'].fillna(False, inplace=True)
+        # df['Lilly_rules_pass'].fillna(False, inplace=True)
 
-        return df_out.set_index('ID')
+        return df_out.set_index("ID")
 
-    def _load_data(self,
-                   mol_dir:str,
-                   filename: str,
-                   prefix:str,
-                   pymolgen:bool,
-                   mol_type: str,
-                   chunksize:int=10000,
-                   retain_ids:bool=False,
-                   core: str=None,
-                   sub_point:int=None,
-                   keep_core:bool=False,
-                   save_chunks: bool=False,
-                   save_path: str=None):
-        
+    def _load_data(
+        self,
+        mol_dir: str,
+        filename: str,
+        prefix: str,
+        pymolgen: bool,
+        mol_type: str,
+        chunksize: int = 10000,
+        retain_ids: bool = False,
+        core: str = None,
+        sub_point: int = None,
+        keep_core: bool = False,
+        save_chunks: bool = False,
+        save_path: str = None,
+    ):
+
         self.data_ls = []
 
-        chunks = self._make_chunks(mol_dir, filename, retain_ids, pymolgen, prefix, chunksize)
-        print(f'Total chunks: {len(chunks)}')
+        chunks = self._make_chunks(
+            mol_dir, filename, retain_ids, pymolgen, prefix, chunksize
+        )
+        print(f"Total chunks: {len(chunks)}")
 
-        arguments = [(mol_type, chunk['SMILES'].tolist(), sub_point, core, keep_core) for chunk in chunks]
+        arguments = [
+            (mol_type, chunk["SMILES"].tolist(), sub_point, core, keep_core)
+            for chunk in chunks
+        ]
 
         with Pool() as pool:
             results = pool.map(self._process_mols_wrapper, arguments)
 
         for i, (chunk, item) in enumerate(zip(chunks, results)):
-            print(f'Processing chunk {i+1}')
+            print(f"Processing chunk {i+1}")
 
             canon_mol_ls, frag_smi_ls, canon_smi_ls, kek_smi_ls = item
 
-            ph_canon_smi_ls = [self._adjust_smi_for_ph(smi, phmodel='OpenEye') for smi in canon_smi_ls]
-            
+            ph_canon_smi_ls = [
+                self._adjust_smi_for_ph(smi, phmodel="OpenEye") for smi in canon_smi_ls
+            ]
+
             data = {
-            'ID': chunk.index,
-            'Mol': canon_mol_ls,
-            'Frag_SMILES': frag_smi_ls,
-            'SMILES': ph_canon_smi_ls,
-            'Kekulised_SMILES': kek_smi_ls
-                }
-            
+                "ID": chunk.index,
+                "Mol": canon_mol_ls,
+                "Frag_SMILES": frag_smi_ls,
+                "SMILES": ph_canon_smi_ls,
+                "Kekulised_SMILES": kek_smi_ls,
+            }
+
             smi_df = pd.DataFrame(data)
             lilly_smi_df = self._apply_lilly_rules(smi_df)
 
             self.data_ls.append(lilly_smi_df)
 
             if save_chunks:
-                lilly_smi_df.to_csv(f'{save_path}/raw_chunks_{i+1}.csv.gz', index='ID', compression='gzip')
+                lilly_smi_df.to_csv(
+                    f"{save_path}/raw_chunks_{i+1}.csv.gz",
+                    index="ID",
+                    compression="gzip",
+                )
 
         return self.data_ls
 
-    def _calculate_oe_LogP(self,
-                           smi: str):
+    def _calculate_oe_LogP(self, smi: str):
         """
         Description
         -----------
@@ -1341,20 +1430,17 @@ class mp_Dataset_Formatter():
 
         # Check is smile gives valid molecule object
         if not oe.OESmilesToMol(mol, smi):
-            print('ERROR: {}'.format(smi))
+            print("ERROR: {}".format(smi))
         else:
             # Calculate logP
             try:
-                logp= oe.OEGetXLogP(mol, atomxlogps=None)
+                logp = oe.OEGetXLogP(mol, atomxlogps=None)
             except RuntimeError:
                 print(smi)
         return logp
-    
-    def _get_descriptors(self,
-                         mol,
-                         missingVal=None,
-                         descriptor_set: str='RDKit'):
-    
+
+    def _get_descriptors(self, mol, missingVal=None, descriptor_set: str = "RDKit"):
+
         """
         Description
         -----------
@@ -1377,22 +1463,23 @@ class mp_Dataset_Formatter():
         }
 
         """
-        
+
         res = {}
-        if descriptor_set =='RDKit':
-            for name,func in Descriptors._descList:
+        if descriptor_set == "RDKit":
+            for name, func in Descriptors._descList:
                 # some of the descriptor fucntions can throw errors if they fail, catch those here:
                 try:
                     val = func(mol)
                 except:
                     # print the error message:
                     import traceback
+
                     traceback.print_exc()
                     # and set the descriptor value to whatever missingVal is
                     val = missingVal
                 res[name] = val
 
-        elif descriptor_set == 'Mordred':
+        elif descriptor_set == "Mordred":
             calc = Calculator(descriptors, ignore_3D=True)
 
             try:
@@ -1408,17 +1495,18 @@ class mp_Dataset_Formatter():
 
         return res
 
-    def _get_descriptors_wrapper(self,
-                                 args):
-        
+    def _get_descriptors_wrapper(self, args):
+
         return self._get_descriptors(*args)
 
-    def _calculate_desc_df(self,
-                           df_list: list=None,
-                           descriptor_set: str='RDKit',
-                           save_desc_df:bool=False,
-                           save_path:str=None,
-                           filename:str=None):
+    def _calculate_desc_df(
+        self,
+        df_list: list = None,
+        descriptor_set: str = "RDKit",
+        save_desc_df: bool = False,
+        save_path: str = None,
+        filename: str = None,
+    ):
         """
         Description
         -----------
@@ -1442,71 +1530,86 @@ class mp_Dataset_Formatter():
         |____|_____|_____________|________|_________|______|_______|_____|
 
         """
-        
-        
+
         # Setting up temporary df so to not save over self.smi_df
         if df_list is not None:
             tmp_df_ls = df_list
         else:
             tmp_df_ls = self.data_ls
-        
+
         self.batch_desc_ls = []
         self.batch_full_ls = []
-
 
         for tmp_df in tmp_df_ls:
             # Getting the descriptors for each mol object and saving the dictionary
             # in a column named descriptors
-            rows = tmp_df.to_dict('records')
+            rows = tmp_df.to_dict("records")
 
             with Pool(processes=self.cpu_count) as pool:
-                desc_mp_item = pool.map(self._get_descriptors_wrapper, [(row['Mol'], None, descriptor_set) for row in rows])
+                desc_mp_item = pool.map(
+                    self._get_descriptors_wrapper,
+                    [(row["Mol"], None, descriptor_set) for row in rows],
+                )
 
             # Making a new pd.Dataframe with each descriptor as a column, setting the
             # index to match self.smi_df (or tmp_df)
-            tmp_df['Descriptors'] = desc_mp_item
+            tmp_df["Descriptors"] = desc_mp_item
 
-            if descriptor_set=='RDKit':
-                desc_df = pd.DataFrame(tmp_df['Descriptors'].tolist(), columns=[d[0] for d in Descriptors.descList])
+            if descriptor_set == "RDKit":
+                desc_df = pd.DataFrame(
+                    tmp_df["Descriptors"].tolist(),
+                    columns=[d[0] for d in Descriptors.descList],
+                )
 
-            elif descriptor_set=='Mordred':
-                calc=Calculator(descriptors, ignore_3D=True)
-                desc_df = pd.DataFrame(tmp_df['Descriptors'].tolist(), columns=[str(d) for d in calc.descriptors])
+            elif descriptor_set == "Mordred":
+                calc = Calculator(descriptors, ignore_3D=True)
+                desc_df = pd.DataFrame(
+                    tmp_df["Descriptors"].tolist(),
+                    columns=[str(d) for d in calc.descriptors],
+                )
 
-            desc_df['ID'] = tmp_df.index.tolist()
-            desc_df = desc_df.set_index('ID')
+            desc_df["ID"] = tmp_df.index.tolist()
+            desc_df = desc_df.set_index("ID")
 
-            if 'nARing' in desc_df.columns:
-                desc_df.rename(columns={'naRing': 'NumAromaticRings'}, inplace=True)
-            if 'MW' in desc_df.columns:
-                desc_df.rename(columns={'MW': 'MolWt'}, inplace=True)
+            if "nARing" in desc_df.columns:
+                desc_df.rename(columns={"naRing": "NumAromaticRings"}, inplace=True)
+            if "MW" in desc_df.columns:
+                desc_df.rename(columns={"MW": "MolWt"}, inplace=True)
 
             self.batch_desc_ls.append(desc_df)
 
             # Concatenating the two dfs to give the full set of descriptors and SMILES
-            batch_df = pd.concat([tmp_df, desc_df], axis=1, join='inner').drop(columns=['Descriptors'])
+            batch_df = pd.concat([tmp_df, desc_df], axis=1, join="inner").drop(
+                columns=["Descriptors"]
+            )
 
-            batch_df['oe_logp'] = batch_df['SMILES'].apply(self._calculate_oe_LogP)
-            batch_df['PFI'] = batch_df['NumAromaticRings'] + batch_df['oe_logp']
+            batch_df["oe_logp"] = batch_df["SMILES"].apply(self._calculate_oe_LogP)
+            batch_df["PFI"] = batch_df["NumAromaticRings"] + batch_df["oe_logp"]
 
             self.batch_full_ls.append(batch_df)
 
         if save_desc_df:
             for i, dfs in enumerate(self.batch_desc_ls):
-                dfs.to_csv(save_path+filename+f'_{i+1}.csv.gz', index_col='ID', compression='gzip')
-                print(f'Saved {filename}_{i+1}')
+                dfs.to_csv(
+                    save_path + filename + f"_{i+1}.csv.gz",
+                    index_col="ID",
+                    compression="gzip",
+                )
+                print(f"Saved {filename}_{i+1}")
 
         return self.batch_desc_ls, self.batch_full_ls
 
-    def _filter_df(self,
-                   mw_budget: int=600,
-                   n_arom_rings_limit: int=3,
-                   PFI_limit: int=8,
-                   remove_3_membered_rings: bool=True,
-                   remove_4_membered_rings: bool=True,
-                   max_fused_ring_count: int=1,
-                   pass_lilly_rules: bool=True,
-                   chembl:bool=False):
+    def _filter_df(
+        self,
+        mw_budget: int = 600,
+        n_arom_rings_limit: int = 3,
+        PFI_limit: int = 8,
+        remove_3_membered_rings: bool = True,
+        remove_4_membered_rings: bool = True,
+        max_fused_ring_count: int = 1,
+        pass_lilly_rules: bool = True,
+        chembl: bool = False,
+    ):
         """
         Description
         -----------
@@ -1527,42 +1630,48 @@ class mp_Dataset_Formatter():
         filtered off with the specified filters
 
         """
-        
-        self.filtered_df_ls =[]
+
+        self.filtered_df_ls = []
         for df in self.batch_full_ls:
             if not chembl:
-            # Obtaining all molecules which pass the defined filters
-                all_passing_mols = df[(df['MolWt'] <= mw_budget) &
-                                    (df['NumAromaticRings'] <= n_arom_rings_limit) &
-                                    (df['PFI'] <= PFI_limit) &
-                                    (df['Lilly_rules_pass'] == pass_lilly_rules)]
+                # Obtaining all molecules which pass the defined filters
+                all_passing_mols = df[
+                    (df["MolWt"] <= mw_budget)
+                    & (df["NumAromaticRings"] <= n_arom_rings_limit)
+                    & (df["PFI"] <= PFI_limit)
+                    & (df["Lilly_rules_pass"] == pass_lilly_rules)
+                ]
 
                 filtered_smi = []
                 for index, rows in all_passing_mols.iterrows():
-                    for mol in rows['Mol'].GetRingInfo().AtomRings():
-                        if (remove_3_membered_rings and len(mol) == 3) or (remove_4_membered_rings and len(mol) == 4):
-                                filtered_smi.append(rows['SMILES'])
+                    for mol in rows["Mol"].GetRingInfo().AtomRings():
+                        if (remove_3_membered_rings and len(mol) == 3) or (
+                            remove_4_membered_rings and len(mol) == 4
+                        ):
+                            filtered_smi.append(rows["SMILES"])
 
-                filtered_results = all_passing_mols[~df['SMILES'].isin(filtered_smi)]            
-            columns_to_drop = ['Mol']
+                filtered_results = all_passing_mols[~df["SMILES"].isin(filtered_smi)]
+            columns_to_drop = ["Mol"]
 
             if chembl:
                 filtered_results = df
-            
+
             filtered_results.drop(columns=columns_to_drop, inplace=True)
             self.filtered_df_ls.append(filtered_results)
 
         return self.filtered_df_ls
-    
-    def _make_final_chunks(self,
-                     chunksize: int,
-                     save_full_data: bool=False,
-                     gen_desc_chunks:bool=False,
-                     save_desc_data: bool=True,
-                     descriptor_set: str='RDKit',
-                     full_save_path: str=None,
-                     desc_save_path: str=None,
-                     filename: str=None,):
+
+    def _make_final_chunks(
+        self,
+        chunksize: int,
+        save_full_data: bool = False,
+        gen_desc_chunks: bool = False,
+        save_desc_data: bool = True,
+        descriptor_set: str = "RDKit",
+        full_save_path: str = None,
+        desc_save_path: str = None,
+        filename: str = None,
+    ):
         """
         Description
         -----------
@@ -1580,61 +1689,81 @@ class mp_Dataset_Formatter():
         -------
         Print statements to show which chunk is being saved and where, and a list of the chunks
         """
-        
+
         if len(self.filtered_df_ls) == 1:
             full_df = self.filtered_df_ls[0]
         else:
             full_df = pd.concat(self.filtered_df_ls)
 
-        full_chunks = [full_df.iloc[i: i + chunksize] for i in range(0, full_df.shape[0], chunksize)]
+        full_chunks = [
+            full_df.iloc[i : i + chunksize]
+            for i in range(0, full_df.shape[0], chunksize)
+        ]
         for i, chunk in enumerate(full_chunks):
             if save_full_data:
-                print(f'Saving chunk {i} to:\n{full_save_path}{filename}')
-                chunk.to_csv(f'{full_save_path}{filename}_{i+1}.csv.gz', compression='gzip', index='ID')
-        
+                print(f"Saving chunk {i} to:\n{full_save_path}{filename}")
+                chunk.to_csv(
+                    f"{full_save_path}{filename}_{i+1}.csv.gz",
+                    compression="gzip",
+                    index="ID",
+                )
+
         if gen_desc_chunks:
-            if descriptor_set=='RDKit':
+            if descriptor_set == "RDKit":
                 columns, fns = zip(*Descriptors.descList)
-            if descriptor_set=='Mordred':
+            if descriptor_set == "Mordred":
                 calc = Calculator(descriptors, ignore_3D=True)
                 desc_names = [str(desc) for desc in calc.descriptors]
                 columns = []
                 for desc in desc_names:
-                    if desc == 'naRing':
-                        columns.append('NumAromaticRings')
-                    elif desc == 'MW':
-                        columns.append('MolWt')
+                    if desc == "naRing":
+                        columns.append("NumAromaticRings")
+                    elif desc == "MW":
+                        columns.append("MolWt")
                     else:
                         columns.append(desc)
-                
 
             full_desc = full_df.loc[:, columns]
-            full_desc_chunks = [full_desc.iloc[i: i + chunksize] for i in range(0, full_df.shape[0], chunksize)]
+            full_desc_chunks = [
+                full_desc.iloc[i : i + chunksize]
+                for i in range(0, full_df.shape[0], chunksize)
+            ]
 
             for i, chunk in enumerate(full_desc_chunks):
                 if save_desc_data:
-                    print(f'Saving chunk {i} to:\n{desc_save_path}{filename}')
-                    chunk.to_csv(f'{desc_save_path}{filename}_{i+1}.csv.gz', compression='gzip', index='ID')
+                    print(f"Saving chunk {i} to:\n{desc_save_path}{filename}")
+                    chunk.to_csv(
+                        f"{desc_save_path}{filename}_{i+1}.csv.gz",
+                        compression="gzip",
+                        index="ID",
+                    )
 
         return full_chunks, full_desc_chunks
-    
-class Dataset_Accessor():
-    def __init__(self,
-                original_path:str,
-                temp_suffix: str='.tmp',
-                wait_time: int=30,
-                max_wait: int=21600):
-        
+
+
+class Dataset_Accessor:
+    def __init__(
+        self,
+        original_path: str,
+        temp_suffix: str = ".tmp",
+        wait_time: int = 30,
+        max_wait: int = 21600,
+    ):
+
         self.original_path = Path(original_path)
-        self.temp_path = self.original_path.with_suffix(temp_suffix + self.original_path.suffix)
+        self.temp_path = self.original_path.with_suffix(
+            temp_suffix + self.original_path.suffix
+        )
         self.wait_time = wait_time
-        self.max_wait=max_wait
-    
-    def get_exclusive_access(self,
-                            original_path: str=None, 
-                            temp_path: str=None,
-                            wait_time: int=None,
-                            max_wait: int=21600):
+        self.max_wait = max_wait
+
+    def get_exclusive_access(
+        self,
+        original_path: str = None,
+        temp_path: str = None,
+        wait_time: int = None,
+        max_wait: int = 21600,
+    ):
         """
         Description
         -----------
@@ -1647,37 +1776,39 @@ class Dataset_Accessor():
         wait_time (int)         Time in between attempts for access to file in seconds
         max_wait (int)          Maximum time the file will wait to gain access in seconds (default is 6 hours)
         """
-        
+
         if original_path is None:
             original_path = self.original_path
         if temp_path is None:
             temp_path = self.temp_path
         if wait_time is None:
             wait_time = self.wait_time
-        
+
         waited = 0
         while True:
             try:
                 original_path.rename(temp_path)
                 return str(temp_path)
-            
+
             except FileNotFoundError:
-                print(f'File "{original_path.stem} is in use.\nRetrying in {wait_time} seconds...')
-            
+                print(
+                    f'File "{original_path.stem} is in use.\nRetrying in {wait_time} seconds...'
+                )
+
             except Exception as e:
-                print(f'An error occurred while renaming {original_path.stem} for exclusive access:\n{e}')
+                print(
+                    f"An error occurred while renaming {original_path.stem} for exclusive access:\n{e}"
+                )
                 return None
-            
+
             time.sleep(wait_time)
             waited += wait_time
             if waited > max_wait:
-                print(f'Reached maximum waiting time on file:\n{original_path.stem}')
+                print(f"Reached maximum waiting time on file:\n{original_path.stem}")
                 return None
-    
-    def release_file(self,
-                    original_path: str=None, 
-                    temp_path: str=None):
-        
+
+    def release_file(self, original_path: str = None, temp_path: str = None):
+
         if original_path is None:
             original_path = self.original_path
         if temp_path is None:
@@ -1685,19 +1816,23 @@ class Dataset_Accessor():
 
         try:
             temp_path.rename(original_path)
-            print(f'File {temp_path.stem} renamed back to {original_path.stem}')
+            print(f"File {temp_path.stem} renamed back to {original_path.stem}")
         except Exception as e:
-            print(f'An error occurred while renaming {temp_path.stem} back to {original_path.stem}:\n{e}')
+            print(
+                f"An error occurred while renaming {temp_path.stem} back to {original_path.stem}:\n{e}"
+            )
 
-    def edit_df(self,
-                column_to_edit: str,
-                df: pd.DataFrame=None,
-                df_path: str=None,
-                index_col:str='ID',
-                idxs_to_edit: list=None,
-                vals_to_enter: list=None,
-                data_dict: dict=None):
-        
+    def edit_df(
+        self,
+        column_to_edit: str,
+        df: pd.DataFrame = None,
+        df_path: str = None,
+        index_col: str = "ID",
+        idxs_to_edit: list = None,
+        vals_to_enter: list = None,
+        data_dict: dict = None,
+    ):
+
         if df is not None:
             self.df = df
 
@@ -1705,7 +1840,7 @@ class Dataset_Accessor():
             df_path = self.temp_path
 
         if df is None:
-            self.df = pd.read_csv(df_path, index_col=index_col, compression='gzip')
+            self.df = pd.read_csv(df_path, index_col=index_col, compression="gzip")
 
         if idxs_to_edit is not None and vals_to_enter is not None:
             for idx, val in zip(idxs_to_edit, vals_to_enter):
@@ -1714,8 +1849,10 @@ class Dataset_Accessor():
         elif data_dict is not None:
             for idx, val in data_dict.items():
                 self.df.loc[idx, column_to_edit] = str(val)
-        
+
         else:
-            raise ValueError("Either data_dict, idx_to_edit, or vals_to_enter were not entered")
-        
-        self.df.to_csv(df_path, index_label=index_col, compression='gzip')
+            raise ValueError(
+                "Either data_dict, idx_to_edit, or vals_to_enter were not entered"
+            )
+
+        self.df.to_csv(df_path, index_label=index_col, compression="gzip")

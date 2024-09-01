@@ -23,13 +23,13 @@ import math
 
 
 class RF_model:
-    def __init__(self):
+    def __init__(self, docking_column: str):
         """
         Description
         -----------
         Initialising the ML models class
         """
-        return
+        self.docking_column = docking_column
 
     def _set_inner_cv(self, cv_type: str = "kfold", n_splits: int = 5):
         """
@@ -48,7 +48,7 @@ class RF_model:
         The object for inner CV.
 
         """
-        rng = rand.randint(0, 2**31)
+        rng = rand.randint(0, 2 ** 31)
 
         if cv_type == "kfold":
             self.inner_cv = KFold(n_splits=n_splits, shuffle=True, random_state=rng)
@@ -56,7 +56,7 @@ class RF_model:
         return self.inner_cv
 
     def _calculate_performance(
-        self, feature_test: pd.DataFrame, target_test: pd.DataFrame, best_rf: object, resample_number: int
+        self, feature_test: pd.DataFrame, target_test: pd.DataFrame, best_rf: object
     ):
         """
         Description
@@ -89,10 +89,9 @@ class RF_model:
         pred = predictions.astype(float)
         errors = true - pred
 
-
         # Calculate performance metrics
         bias = np.mean(errors)
-        sdep = (np.mean((true-pred-(np.mean(true-pred)))**2))**0.5
+        sdep = (np.mean((true - pred - (np.mean(true - pred))) ** 2)) ** 0.5
         mse = mean_squared_error(true, pred)
         rmse = np.sqrt(mse)
         r2 = r2_score(true, pred)
@@ -107,7 +106,7 @@ class RF_model:
         test_size: float,
         save_interval_models: bool,
         save_path: str,
-        hyper_params: dict
+        hyper_params: dict,
     ):
         """
         Description
@@ -131,7 +130,7 @@ class RF_model:
         """
 
         # Setting a random seed value
-        rng = rand.randint(0, 2**31)
+        rng = rand.randint(0, 2 ** 31)
 
         print(f"Performing resample {n + 1}")
         resample_number = n + 1
@@ -146,10 +145,8 @@ class RF_model:
         tar_te = tar_te.values.ravel() if isinstance(tar_te, pd.DataFrame) else tar_te
 
         # Initialize the model and inner cv and pipeline it to prevent data leakage
-        rf = Pipeline([
-            ('rf', RandomForestRegressor())
-        ])
-        
+        rf = Pipeline([("rf", RandomForestRegressor())])
+
         self._set_inner_cv(cv_type=self.inner_cv_type, n_splits=self.n_splits)
 
         # Setting the search type for hyper parameter optimisation
@@ -167,7 +164,7 @@ class RF_model:
                 n_iter=self.n_resamples,
                 cv=self.inner_cv,
                 scoring=self.scoring,
-                random_state=rand.randint(0, 2**31),
+                random_state=rand.randint(0, 2 ** 31),
             )
 
         # Training the model
@@ -175,11 +172,11 @@ class RF_model:
 
         # Obtaining the best model in
         best_pipeline = search.best_estimator_
-        best_rf = best_pipeline.named_steps['rf']
+        best_rf = best_pipeline.named_steps["rf"]
 
         # Calculating the performance of each resample
         performance = self._calculate_performance(
-            target_test=tar_te, feature_test=feat_te, best_rf=best_rf, resample_number=resample_number
+            target_test=tar_te, feature_test=feat_te, best_rf=best_rf
         )
 
         # Isolating the true and predicted values used in performance calculations
@@ -189,22 +186,32 @@ class RF_model:
         performance = performance[:-2]
 
         # Calculate cross-validation scores for the best estimator
-        cross_val_scores = cross_val_score(search.best_estimator_,
-                                        feat_tr,
-                                        tar_tr,
-                                        cv=self.inner_cv,
-                                        scoring=self.scoring)
+        cross_val_scores = cross_val_score(
+            search.best_estimator_,
+            feat_tr,
+            tar_tr,
+            cv=self.inner_cv,
+            scoring=self.scoring,
+        )
 
         # Saving the model at each resample
         if save_interval_models:
             joblib.dump(best_rf, f"{save_path}{n}.pkl")
 
-        return search.best_params_, performance, best_rf.feature_importances_, resample_number, true_vals_ls, pred_vals_ls, cross_val_scores
-    
+        return (
+            search.best_params_,
+            performance,
+            best_rf.feature_importances_,
+            resample_number,
+            true_vals_ls,
+            pred_vals_ls,
+            cross_val_scores,
+        )
+
     def Train_Regressor(
         self,
         search_type: str,
-        scoring: str = 'neg_mean_squared_error',
+        scoring: str = "neg_mean_squared_error",
         n_resamples: int = 50,
         inner_cv_type: str = "kfold",
         n_splits: int = 5,
@@ -216,7 +223,7 @@ class RF_model:
         save_path: str = None,
         save_final_model: bool = False,
         plot_feat_importance: bool = False,
-        batch_size: int=2
+        batch_size: int = 2,
     ):
         """
         Description
@@ -257,15 +264,8 @@ class RF_model:
         self.n_resamples = n_resamples
 
         # Dropping indexes which failed to dock
-        ids_to_drop = []
-        for id, val in targets.items():
-            if val == "False":
-                ids_to_drop.append(id)
-            else:
-                continue
-        
-        targets = targets.drop(index=ids_to_drop)
-        features = features.drop(index=ids_to_drop)
+        targets = targets[targets[self.docking_column] != "False"]
+        features = features.loc[targets.index]
 
         def process_batch(batch_indices: list):
             """
@@ -291,27 +291,46 @@ class RF_model:
                 - True target values used to create the performance metrics (array)
                 - Predicted target values used to create the performance metrics (array)
             """
-            
+
             results_batch = []
             for n in batch_indices:
                 result = self._fit_model_and_evaluate(
-                    n, features, targets, test_size, save_interval_models, save_path, hyper_params
+                    n,
+                    features,
+                    targets,
+                    test_size,
+                    save_interval_models,
+                    save_path,
+                    hyper_params,
                 )
                 results_batch.append(result)
             return results_batch
 
         # Calculating the batch size for the number of resamples to submit
         n_batches = (n_resamples + batch_size - 1) // batch_size
-        batches = [range(i * batch_size, min((i + 1) * batch_size, n_resamples)) for i in range(n_batches)]
+        batches = [
+            range(i * batch_size, min((i + 1) * batch_size, n_resamples))
+            for i in range(n_batches)
+        ]
 
         # Multiprocessing the to process eatch batch
-        results_batches = Parallel(n_jobs=40)(delayed(process_batch)(batch) for batch in batches)
+        results_batches = Parallel(n_jobs=40)(
+            delayed(process_batch)(batch) for batch in batches
+        )
 
         # Flattening the results into a single list
         results = [result for batch in results_batches for result in batch]
 
         # Obtaining each value from result's list of lists
-        best_params_ls, self.performance_list, feat_importance_ls, self.resample_number_ls, self.true_vals_ls, self.pred_vals_ls, self.cv_score_ls= zip(*results)
+        (
+            best_params_ls,
+            self.performance_list,
+            feat_importance_ls,
+            self.resample_number_ls,
+            self.true_vals_ls,
+            self.pred_vals_ls,
+            self.cv_score_ls,
+        ) = zip(*results)
 
         # Putting the best parameters into a dictionary and forcing float type onto them to
         # remove potential issues
@@ -323,10 +342,18 @@ class RF_model:
 
         # Calculating average performance metrics across all training resamples
         self.performance_dict = {
-            "Bias": round(float(np.mean([perf[0] for perf in self.performance_list])), 4),
-            "SDEP": round(float(np.mean([perf[1] for perf in self.performance_list])), 4),
-            "MSE": round(float(np.mean([perf[2] for perf in self.performance_list])), 4),
-            "RMSE": round(float(np.mean([perf[3] for perf in self.performance_list])), 4),
+            "Bias": round(
+                float(np.mean([perf[0] for perf in self.performance_list])), 4
+            ),
+            "SDEP": round(
+                float(np.mean([perf[1] for perf in self.performance_list])), 4
+            ),
+            "MSE": round(
+                float(np.mean([perf[2] for perf in self.performance_list])), 4
+            ),
+            "RMSE": round(
+                float(np.mean([perf[3] for perf in self.performance_list])), 4
+            ),
             "r2": round(float(np.mean([perf[4] for perf in self.performance_list])), 4),
         }
 
@@ -348,7 +375,9 @@ class RF_model:
 
         # Removing the 'rf__' prefix on the best determined hyper parameters
         # ('rf__' needed for the pipelining of the rf model in _fit_model_and_evaluate function)
-        cleaned_best_params = {key.split('__')[1]: value for key, value in best_params.items()}
+        cleaned_best_params = {
+            key.split("__")[1]: value for key, value in best_params.items()
+        }
 
         # Training final model on best hyper parameters and on whole data
         self.final_rf = RandomForestRegressor(**cleaned_best_params)
@@ -364,61 +393,77 @@ class RF_model:
 
             with open(f"{save_path}/best_params.json", "w") as file:
                 json.dump(best_params, file)
-            
-            features.to_csv(f'{save_path}/training_data/training_features.csv.gz', index_label='ID', compression='gzip')
-            targets.to_csv(f'{save_path}/training_data/training_targets.csv.gz', index_label='ID', compression='gzip')
+
+            features.to_csv(
+                f"{save_path}/training_data/training_features.csv.gz",
+                index_label="ID",
+                compression="gzip",
+            )
+            targets.to_csv(
+                f"{save_path}/training_data/training_targets.csv.gz",
+                index_label="ID",
+                compression="gzip",
+            )
 
         print(self.performance_dict)
 
-        return self.final_rf, best_params, self.performance_dict, feat_importance_df, self.true_vals_ls, self.pred_vals_ls, self.cv_score_ls
+        return (
+            self.final_rf,
+            best_params,
+            self.performance_dict,
+            feat_importance_df,
+            self.true_vals_ls,
+            self.pred_vals_ls,
+            self.cv_score_ls,
+        )
 
-    def AnalyseModel(self,
-                     plot_data_leakage: bool=True,
-                     plot_resample_preds: bool=False,
-                     resample_n: int=None,
-                     show_cv_scores: bool=True,
-                     check_preds_on_val: bool=True
-                     ):
-        
+    def AnalyseModel(
+        self,
+        plot_data_leakage: bool = True,
+        plot_resample_preds: bool = False,
+        resample_n: int = None,
+        show_cv_scores: bool = True,
+        check_preds_on_val: bool = True,
+    ):
+
         if plot_data_leakage:
             mse_list = [perf[2] for perf in self.performance_list]
-            
+
             # Prepare data for seaborn
-            data = pd.DataFrame({
-                'Resample Number': self.resample_number_ls,
-                'MSE': mse_list
-            })
+            data = pd.DataFrame(
+                {"Resample Number": self.resample_number_ls, "MSE": mse_list}
+            )
 
             # Create the scatter plot
-            plt.figure(figsize=(8,6))
-            sns.scatterplot(data=data, x='Resample Number', y='MSE', marker='o', color='blue')
-            
-            plt.title('Data Leakage Plot')
-            plt.xlabel('Resample Number')
-            plt.ylabel('MSE')
+            plt.figure(figsize=(8, 6))
+            sns.scatterplot(
+                data=data, x="Resample Number", y="MSE", marker="o", color="blue"
+            )
+
+            plt.title("Data Leakage Plot")
+            plt.xlabel("Resample Number")
+            plt.ylabel("MSE")
             plt.grid(True)
-            
+
             plt.show()
 
         if plot_resample_preds:
             true = self.true_vals_ls[resample_n]
             pred = self.pred_vals_ls[resample_n]
 
-            data = pd.DataFrame({
-                'True_Val': true,
-                'Pred_Val': pred
-                })
-            
-            plt.figure(figsize=(8,6))
-            
-            sns.regplot(x='True_Val',
-                        y='Pred_Val',
-                        data=data,
-                        scatter_kws={'s': 50},
-                        line_kws = {'color': 'red',
-                                    'linestyle':'--'})
-             
-            plt.axis('equal')
+            data = pd.DataFrame({"True_Val": true, "Pred_Val": pred})
+
+            plt.figure(figsize=(8, 6))
+
+            sns.regplot(
+                x="True_Val",
+                y="Pred_Val",
+                data=data,
+                scatter_kws={"s": 50},
+                line_kws={"color": "red", "linestyle": "--"},
+            )
+
+            plt.axis("equal")
 
             # Determine axis limits
             min_val = min(np.min(true), np.min(pred))
@@ -426,21 +471,25 @@ class RF_model:
             plt.xlim(min_val, max_val)
             plt.ylim(min_val, max_val)
 
-            plt.plot([min_val, max_val], [min_val, max_val], 'g--', label='x=y')
+            plt.plot([min_val, max_val], [min_val, max_val], "g--", label="x=y")
 
             plt.legend()
-            plt.xlabel('True Value')
-            plt.ylabel('Predicted Value')
-            plt.title('True vs Predicted with Trendline and x=y line')
+            plt.xlabel("True Value")
+            plt.ylabel("Predicted Value")
+            plt.title("True vs Predicted with Trendline and x=y line")
             plt.show()
 
         if show_cv_scores:
-            print(f'Mean Cross Validation Score:\n{round(np.mean(self.cv_score_ls), 4)}')
-            print(f'Std Deviation of Cross Valisation Score:\n{round(np.std(self.cv_score_ls), 4)}')
+            print(
+                f"Mean Cross Validation Score:\n{round(np.mean(self.cv_score_ls), 4)}"
+            )
+            print(
+                f"Std Deviation of Cross Valisation Score:\n{round(np.std(self.cv_score_ls), 4)}"
+            )
 
         if check_preds_on_val:
             return
-        
+
     def _plot_feature_importance(
         self,
         feat_importance_df: pd.DataFrame = None,
@@ -477,8 +526,8 @@ class RF_model:
             palette="viridis",
             dodge=False,
             hue="Feature",
-            legend=False
-            )
+            legend=False,
+        )
 
         plt.title("Feature Importances")
         plt.xlabel("Importance")
@@ -489,11 +538,7 @@ class RF_model:
 
         return
 
-    def _calc_mpo(self,
-                    full_data_fpath,
-                    preds_df,
-                    preds_col_name
-                    ):
+    def _calc_mpo(self, full_data_fpath, preds_df, preds_col_name):
         """
         Description
         -----------
@@ -511,24 +556,29 @@ class RF_model:
         New pandas DataFrame object containing the MPO scores
         
         """
-        df = pd.read_csv(full_data_fpath, index_col='ID', usecols=['ID', 'PFI', 'oe_logp'])
+        df = pd.read_csv(
+            full_data_fpath, index_col="ID", usecols=["ID", "PFI", "oe_logp"]
+        )
         df[preds_col_name] = preds_df[preds_col_name]
-        df['MPO'] = [-score * 1/(1 + math.exp(PFI -8)) for score, PFI in zip(preds_df[preds_col_name], df['PFI'])]
-    
+        df["MPO"] = [
+            -score * 1 / (1 + math.exp(PFI - 8))
+            for score, PFI in zip(preds_df[preds_col_name], df["PFI"])
+        ]
+
         return df
-    
+
     def Predict(
-            self,
-            feats: pd.DataFrame,
-            save_preds: bool,
-            preds_save_path: str = None,
-            preds_filename: str = None,
-            final_rf: str = None,
-            pred_col_name: str = "affinity_pred",
-            calc_mpo: bool=True,
-            full_data_fpath: str=None
-        ):
-            """
+        self,
+        feats: pd.DataFrame,
+        save_preds: bool,
+        preds_save_path: str = None,
+        preds_filename: str = None,
+        final_rf: str = None,
+        pred_col_name: str = "affinity_pred",
+        calc_mpo: bool = True,
+        full_data_fpath: str = None,
+    ):
+        """
             Descripton
             ----------
             Function to take make predictions using the input RF model
@@ -547,32 +597,31 @@ class RF_model:
             pd.DataFrame object containing all of the predictions
             """
 
-            if final_rf is not None:
-                rf_model = joblib.load(final_rf)
-            else:
-                rf_model = self.final_rf
+        if final_rf is not None:
+            rf_model = joblib.load(final_rf)
+        else:
+            rf_model = self.final_rf
 
-            preds_df = pd.DataFrame()
-            preds_df[pred_col_name] = rf_model.predict(feats)
-            preds_df.index = feats.index
+        preds_df = pd.DataFrame()
+        preds_df[pred_col_name] = rf_model.predict(feats)
+        preds_df.index = feats.index
 
-            all_tree_preds = np.stack(
-                [tree.predict(feats) for tree in rf_model.estimators_]
+        all_tree_preds = np.stack(
+            [tree.predict(feats) for tree in rf_model.estimators_]
+        )
+
+        if calc_mpo:
+            preds_df = self._calc_mpo(
+                full_data_fpath, preds_df=preds_df, preds_col_name=pred_col_name
             )
 
-            if calc_mpo:
-                preds_df = self._calc_mpo(full_data_fpath,
-                                        preds_df=preds_df,
-                                        preds_col_name=pred_col_name
-                                        )
-                
-            preds_df["Uncertainty"] = np.std(all_tree_preds, axis=0)
+        preds_df["Uncertainty"] = np.std(all_tree_preds, axis=0)
 
-            if save_preds:
-                preds_df.to_csv(
-                    f"{preds_save_path}/{preds_filename}.csv.gz",
-                    index_label='ID',
-                    compression="gzip",
-                )
+        if save_preds:
+            preds_df.to_csv(
+                f"{preds_save_path}/{preds_filename}.csv.gz",
+                index_label="ID",
+                compression="gzip",
+            )
 
-            return preds_df
+        return preds_df

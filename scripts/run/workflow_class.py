@@ -6,6 +6,7 @@ from collections import defaultdict
 import re
 from prettytable import PrettyTable
 import warnings
+
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -37,44 +38,52 @@ from mol_sel_fns import Molecule_Selector
 sys.path.insert(0, PROJ_DIR + "/scripts/misc/")
 from misc_functions import molid2batchno
 
+
 def read_csv_files(filename, columns=None):
-    return pd.read_csv(filename, compression='gzip')
+    return pd.read_csv(filename, compression="gzip")
+
 
 def order_glob_files(file_ls: list):
-    sorted_ls = sorted(file_ls, key=lambda x: int(re.findall(r'\d+', x.split('_')[-1])[0]))
+    sorted_ls = sorted(
+        file_ls, key=lambda x: int(re.findall(r"\d+", x.split("_")[-1])[0])
+    )
     return sorted_ls
 
+
 class RecDMTA:
-    def __init__(self,
-                 full_data_fpath: str,
-                 full_data_fprefix: str,
-                 desc_fpath: str,
-                 desc_fprefix: str,
-                 start_iter: int,
-                 total_iters: int,
-                 n_cmpds: int,
-                 docking_dir: str,
-                 results_dir: str,
-                 init_model_dir: str,
-                 chosen_mol_file: str,
-                 selection_method: str,
-                 docking_score_files: str,
-                 run_name: str,
-                 max_confs: int=1,
-                 id_prefix: str='PMG-', 
-                 docking_column: str="CNN_affinity",
-                 n_cpus: int=40,
-                 receptor_path: str=PROJ_DIR+"/scripts/docking/receptors/4bw1_5_conserved_HOH.pdbqt",
-                 max_runtime: int=60*60*168,
-                 max_it_runtime: int=60*60*10,
-                 hyper_params: dict={
-                     'rf__n_estimators': [100],
-                     'rf__max_features': ['sqrt'],
-                     'rf__max_depth': [15, 20, 25],
-                     'rf__min_samples_split': [2, 5],
-                     'rf__min_samples_leaf': [2, 5]
-                 }
-                 ):
+    def __init__(
+        self,
+        full_data_fpath: str,
+        full_data_fprefix: str,
+        desc_fpath: str,
+        desc_fprefix: str,
+        start_iter: int,
+        total_iters: int,
+        n_cmpds: int,
+        docking_dir: str,
+        docking_file_dir: str,
+        results_dir: str,
+        init_model_dir: str,
+        chosen_mol_file: str,
+        selection_method: str,
+        docking_score_files: str,
+        run_name: str,
+        docking_column,
+        max_confs: int = 1,
+        id_prefix: str = "PMG-",
+        n_cpus: int = 40,
+        receptor_path: str = PROJ_DIR
+        + "/scripts/docking/receptors/4bw1_5_conserved_HOH.pdbqt",
+        max_runtime: int = 60 * 60 * 168,
+        max_it_runtime: int = 60 * 60 * 10,
+        hyper_params: dict = {
+            "rf__n_estimators": [400, 500],
+            "rf__max_features": ["sqrt"],
+            "rf__max_depth": [25, 50, 75, 100],
+            "rf__min_samples_split": [2, 5],
+            "rf__min_samples_leaf": [2, 4, 8],
+        },
+    ):
         """
         Description
         -----------
@@ -118,24 +127,24 @@ class RecDMTA:
         """
 
         global PROJ_DIR
-        
+
         self.full_df = pd.DataFrame()
 
-        if full_data_fpath.endswith('/'):
+        if full_data_fpath.endswith("/"):
             self.full_fpath = full_data_fpath + full_data_fprefix
         else:
-            self.full_fpath = full_data_fpath + '/' + full_data_fprefix
+            self.full_fpath = full_data_fpath + "/" + full_data_fprefix
 
-        if desc_fpath.endswith('/'):
+        if desc_fpath.endswith("/"):
             self.desc_fpath = desc_fpath + desc_fprefix
         else:
-            self.desc_fpath = desc_fpath + '/' + desc_fprefix
+            self.desc_fpath = desc_fpath + "/" + desc_fprefix
 
         # Pathways
-        self.full_flist = glob(f'{self.full_fpath}')
+        self.full_flist = glob(f"{self.full_fpath}")
         self.full_flist = order_glob_files(self.full_flist)
 
-        self.desc_flist = glob(f'{self.desc_fpath}')
+        self.desc_flist = glob(f"{self.desc_fpath}")
         self.desc_flist = order_glob_files(self.desc_flist)
 
         self.docking_dir = docking_dir
@@ -143,16 +152,16 @@ class RecDMTA:
         self.init_model_dir = init_model_dir
         self.chosen_mol_file = chosen_mol_file
         self.receptor_path = receptor_path
-        self.docking_score_files = self.docking_dir + docking_score_files
+        self.docking_score_files = docking_file_dir + docking_score_files
         self.PROJ_DIR = PROJ_DIR
         self.prev_it_dir = init_model_dir
-        self.run_dir = self.results_dir + run_name + '/'
+        self.run_dir = self.results_dir + run_name + "/"
         mk_run_dir = Path(self.run_dir)
         if not mk_run_dir.exists():
             mk_run_dir.mkdir()
-            link_name = mk_run_dir / 'it0'
+            link_name = mk_run_dir / "it0"
             link_name.symlink_to(Path(init_model_dir))
-            print(f'Symbolic link created: \n{link_name} -> {Path(init_model_dir)}')
+            print(f"Symbolic link created: \n{link_name} -> {Path(init_model_dir)}")
 
         # Iteration Settings
         self.start_iter = start_iter
@@ -163,7 +172,7 @@ class RecDMTA:
         self.selection_method = selection_method
         self.id_prefix = id_prefix
         self.hyper_params = hyper_params
-        self.max_confs=max_confs
+        self.max_confs = max_confs
 
         # Timings
         self.time_ran = 0
@@ -175,10 +184,7 @@ class RecDMTA:
         else:
             self.avg_runtime = 0
 
-    def SelectCmpds(self,
-                    iteration: int,
-                    prev_it_dir: str,
-                    frac: float=0.1):
+    def SelectCmpds(self, iteration: int, prev_it_dir: str, frac: float = 0.1):
         """
         Description
         -----------
@@ -202,174 +208,190 @@ class RecDMTA:
                         | x  |    1     |
                         |____|__________|
         """
-        
-        self.sel = Molecule_Selector(n_cmpds=self.n_cmpds,
-                                preds_dir=prev_it_dir,
-                                chosen_mol_file=self.chosen_mol_file,
-                                iteration=iteration)
-        
-        if self.selection_method == 'r':
-            sel_idx = self.sel.random(
 
-            )
+        self.sel = Molecule_Selector(
+            n_cmpds=self.n_cmpds,
+            preds_dir=prev_it_dir,
+            chosen_mol_file=self.chosen_mol_file,
+            iteration=iteration,
+        )
 
-        elif self.selection_method == 'mp':
-            sel_idx = self.sel.best(
-                column="affinity_pred", ascending=False
-            )
-        
-        elif self.selection_method == 'rmp':
+        if self.selection_method == "r":
+            sel_idx = self.sel.random()
+
+        elif self.selection_method == "mp":
+            sel_idx = self.sel.best(column="affinity_pred", ascending=False)
+
+        elif self.selection_method == "rmp":
             sel_idx = self.sel.random_in_best(
                 column="affinity_pred", ascending=False, frac=frac
             )
 
-        elif self.selection_method == 'mu':
-            sel_idx = self.sel.best(
-                column="Uncertainty", ascending=False
-            )
+        elif self.selection_method == "mu":
+            sel_idx = self.sel.best(column="Uncertainty", ascending=False)
 
-        elif self.selection_method == 'mpo':
-          sel_idx = self.sel.best(
-                column="MPO", ascending=True
-            )
-        
-        elif self.selection_method == 'rmpo':
-            sel_idx = self.sel.random_in_best(
-                column="MPO", ascending=True, frac=frac
-            )
+        elif self.selection_method == "mpo":
+            sel_idx = self.sel.best(column="MPO", ascending=True)
 
-        elif self.selection_method == 'test':
-            sel_idx = ['PMG-31895', 'PMG-27063']
+        elif self.selection_method == "rmpo":
+            sel_idx = self.sel.random_in_best(column="MPO", ascending=True, frac=frac)
+
+        elif self.selection_method == "test":
+            sel_idx = ["PMG-31895", "PMG-27063"]
 
         self.df_select = pd.DataFrame(data=[], columns=[], index=sel_idx)
         self.df_select.index.rename("ID", inplace=True)
-        self.df_select["batch_no"] = [molid2batchno(molid, self.id_prefix, prev_it_dir + 'all_preds*') for molid in self.df_select.index]
+        self.df_select["batch_no"] = [
+            molid2batchno(molid, self.id_prefix, prev_it_dir + "all_preds*")
+            for molid in self.df_select.index
+        ]
 
         table = PrettyTable()
-        table.field_names = ['ID'] + list(self.df_select.columns)
+        table.field_names = ["ID"] + list(self.df_select.columns)
         for row in self.df_select.itertuples(index=True):
             table.add_row(row)
 
         print(table)
 
         return self.df_select
+    
+    def _run_docking_wrapper(self, args):
+        batch_no, idxs_in_batch = args
 
-    def RunDocking(self,
-                    ):
+        docking_score_batch_file = self.docking_score_files.replace(
+               "*", str(batch_no)
+            )
+        
+        da = Dataset_Accessor(
+        original_path=docking_score_batch_file,
+        temp_suffix=".dock",
+        wait_time=30,
+            )
+        
+        # Obtain exclusive access to the docking file
+        docking_file = da.get_exclusive_access() 
+        if docking_file is None:
+            print(f"Failed to access file:\n{docking_score_batch_file}")
+            print(f"Redocking of IDs:\n{idxs_in_batch} required")
+            return
+
+        dock_df = pd.read_csv(docking_file, index_col=0)
+
+        # Isolating the molecule ids which have not already been docked or in the process of being docked
+        for_docking = GetUndocked(
+            dock_df=dock_df,
+            idxs_in_batch=idxs_in_batch,
+            scores_col=self.docking_column,
+        )
+
+        if for_docking.empty:
+            print(f"No molecules to dock in batch {batch_no}...")
+            da.release_file()
+            batch_dock_df = pd.read_csv(docking_score_batch_file, index_col=0).loc[
+                idxs_in_batch
+            ]
+            return batch_dock_df
+
+        # Change docking value fr each molecule being docked as 'PD' (pending)
+        da.edit_df(
+            column_to_edit=self.docking_column,
+            idxs_to_edit=for_docking.index,
+            vals_to_enter=["PD" for idx in for_docking.index],
+        )
+
+        # Releases exclusive access on file so parallel runs can access it
+        da.release_file()
+
+        print(
+            "** Docking compounds: " + ", ".join(for_docking.index.tolist()),
+            end="\r",
+        )
+
+        molid_ls = []
+        smi_ls = []
+
+        for molid, smi in for_docking["SMILES"].items():
+            molid_ls.append(molid)
+            smi_ls.append(smi)
+
+        # Initialising the docker
+        docker = Run_GNINA(
+            docking_dir=self.docking_dir,
+            molid_ls=molid_ls,
+            smi_ls=smi_ls,
+            receptor_path=self.receptor_path,
+            max_confs=self.max_confs,
+        )
+
+        # Creating sdfs with numerous conformers and adjusting for pH 7.4
+        docker.ProcessMols(use_multiprocessing=False)
+
+        # Docking the molecules and saving scores in for_docking
+        dock_scores_ls = docker.SubmitJobs(run_hrs=0,
+                                           run_mins=20,
+                                           use_multiprocessing=False)
+
+        if self.docking_column == "CNN_affinity":
+            n = 1
+        else:
+            n = 2
+
+        for_docking[self.docking_column] = dock_scores_ls[n]
+
+        da.get_exclusive_access()
+
+        da.edit_df(
+            column_to_edit=self.docking_column,
+            idxs_to_edit=molid_ls,
+            vals_to_enter=dock_scores_ls[n],
+        )
+
+        da.release_file()
+
+        WaitForDocking(
+            docking_score_batch_file,
+            idxs_in_batch=idxs_in_batch,
+            scores_col=self.docking_column,
+        )
+
+        batch_dock_df = pd.read_csv(docking_score_batch_file, index_col=0)
+        batch_dock_df = batch_dock_df.loc[idxs_in_batch]
+        
+        return batch_dock_df
+
+
+    def RunDocking(self,):
         """
         Description
-        -----------10
+        -----------
+        Function to run the docking portion of the workflow
+
+        Parameters
         ---------
         None
 
         Returns
         -------
-        None
+        pd.DataFrame object containing the docking information for the ids selected
         """
-
-        # Reads selected compounds, grouped by batch
-        for batch_no, idxs_in_batch in (
-            self.df_select.reset_index().groupby("batch_no")['ID'].apply(list).items()
-        ):
-            
-            print(f'+----------- Docking Batch {batch_no} IDs -----------+\n')
-        # Reads csv file containing docking scores
-            docking_score_batch_file = self.docking_score_files.replace("*", str(batch_no))
-            print(docking_score_batch_file)
-
-            da = Dataset_Accessor(
-                original_path = docking_score_batch_file,
-                temp_suffix=".dock",
-                wait_time=30
-            )
-        # Obtain exclusive access to the docking file
-            docking_file = da.get_exclusive_access()
-
-            if docking_file is None:
-                print(f"Failed to access file:\n{docking_score_batch_file}")
-                print(f"Redocking of IDs:\n{idxs_in_batch} required")
-                continue
-                
-            dock_df=pd.read_csv(docking_file, index_col=0)
-
-            print(f'Status of IDs in batch:')
-            print(dock_df[self.docking_column].loc[idxs_in_batch])
-            
-        # Isolating the molecule ids which have not already been docked or in the process of being docked
-            for_docking = GetUndocked(
-                                        dock_df=dock_df,
-                                        idxs_in_batch=idxs_in_batch,
-                                        scores_col=self.docking_column
-                                )
-
         
-        # Change docking value fr each molecule being docked as 'PD' (pending)
-            da.edit_df(
-                column_to_edit=self.docking_column,
-                idxs_to_edit=for_docking.index,
-                vals_to_enter=["PD" for idx in for_docking.index]
+        args = [
+            (batch_no, idxs_in_batch)
+            for batch_no, idxs_in_batch in (
+                self.df_select.reset_index().groupby("batch_no")["ID"].apply(list).items()
             )
+        ]
 
-        # Releases exclusive access on file so parallel runs can access it
-            da.release_file()
+        with Pool(self.n_cpus) as pool:
+            results = pool.map(self._run_docking_wrapper, args)
 
-            print(
-                "** Docking compounds: " + ", ".join(for_docking.index.tolist()),
-                end="\r",
-            )
+        results = [result for result in results if result is not None]
 
-            molid_ls = []
-            smi_ls = []
+        self.fin_dock_df = pd.concat(results, axis=0)
 
-            for molid, smi in for_docking["SMILES"].items():
-                molid_ls.append(molid)
-                smi_ls.append(smi)
+        return self.fin_dock_df.loc[self.df_select.index]
 
-        # Initialising the docker
-            docker = Run_GNINA(
-                docking_dir=self.docking_dir,
-                molid_ls=molid_ls,
-                smi_ls=smi_ls,
-                receptor_path=self.receptor_path,
-                max_confs=self.max_confs
-            )
-
-        # Creating sdfs with numerous conformers and adjusting for pH 7.4
-            docker.ProcessMols(use_multiprocessing=True)
-        
-        # Docking the molecules and saving scores in for_docking
-            dock_scores_ls = docker.SubmitJobs(max_time=1)
-
-            if self.docking_column == "CNN_affinity":
-                n = 1
-            else:
-                n=2
-            for_docking[self.docking_column] = dock_scores_ls[2]
-
-            da.get_exclusive_access()
-
-            da.edit_df(
-                column_to_edit=self.docking_column,
-                idxs_to_edit=molid_ls,
-                vals_to_enter=dock_scores_ls[2]
-            )
-
-            da.release_file()
-
-            WaitForDocking(
-                docking_score_batch_file,
-                idxs_in_batch=idxs_in_batch
-            )
-
-            da.MakeCsv()
-
-            da.CompressFiles()
-
-            self.fin_dock_df=pd.read_csv(docking_score_batch_file, index_col=0)
-            return self.fin_dock_df.loc[self.df_select.index]
-
-    def UpdateTrainingSet(self,
-        ):
+    def UpdateTrainingSet(self,):
         """
         Description
         -----------
@@ -387,9 +409,16 @@ class RecDMTA:
         """
 
         # Obtaining the training data from the previous iteration
-        training_dir = self.prev_it_dir + '/training_data/'
-        prev_feats = pd.read_csv(training_dir + 'training_features.csv.gz', index_col='ID', compression='gzip')
-        prev_targs = pd.read_csv(training_dir + 'training_targets.csv.gz', index_col='ID', compression='gzip')
+        training_dir = self.prev_it_dir + "/training_data/"
+
+        prev_feats = pd.read_csv(
+            training_dir + "training_features.csv.gz",
+            index_col="ID",
+            compression="gzip",
+        )
+        prev_targs = pd.read_csv(
+            training_dir + "training_targets.csv.gz", index_col="ID", compression="gzip"
+        )
 
         # Saving the columns which the previous iteration was trained on
         # (used to make sure the models are trained on the same set of features)
@@ -400,32 +429,36 @@ class RecDMTA:
 
         # Getting the molecule IDs and their batch number to extract data from
         ids = self.fin_dock_df.index
-        batch_nos = [molid2batchno(molid, self.id_prefix, self.desc_fpath) for molid in ids]
+        batch_nos = [
+            molid2batchno(molid, self.id_prefix, self.desc_fpath) for molid in ids
+        ]
 
         batch_to_ids = defaultdict(list)
 
         for id, batch_no in zip(ids, batch_nos):
-            batch_to_ids[batch_no].append(id)        
-        
+            batch_to_ids[batch_no].append(id)
+
         added_desc = pd.DataFrame(columns=prev_feats.columns)
 
         # Creating a new df with all of the new data needed
         for batch in batch_to_ids:
             ids_in_batch = batch_to_ids[batch]
-            desc_csv = self.desc_fpath.replace('*', str(batch))
-            desc_df = pd.read_csv(desc_csv, index_col='ID', usecols=prev_feats.reset_index().columns)
+            desc_csv = self.desc_fpath.replace("*", str(batch))
+            desc_df = pd.read_csv(
+                desc_csv, index_col="ID", usecols=prev_feats.reset_index().columns
+            )
             desc_df = desc_df.loc[ids_in_batch]
-            added_desc = pd.concat([added_desc, desc_df], axis=0) 
+            added_desc = pd.concat([added_desc, desc_df], axis=0)
 
         # Adding new rows onto the previous training data sets
         self.updated_feats = pd.concat([prev_feats, added_desc], axis=0)
-        self.updated_targs = pd.concat([prev_targs, self.fin_dock_df[[self.docking_column]]], axis=0)
+        self.updated_targs = pd.concat(
+            [prev_targs, self.fin_dock_df[[self.docking_column]]], axis=0
+        )
 
         return self.updated_targs, self.updated_feats
-    
-    def _predict_for_files(self,
-                           args: list
-        ):
+
+    def _predict_for_files(self, args: list):
         """
         Description
         -----------
@@ -446,19 +479,18 @@ class RecDMTA:
 
         index, desc_file, full_file, model = args
 
-        feats = pd.read_csv(desc_file, index_col='ID')
+        feats = pd.read_csv(desc_file, index_col="ID")
 
         model.Predict(
             feats=feats[self.prev_feat_cols],
             save_preds=True,
             preds_save_path=self.it_dir,
             preds_filename=f"all_preds_{index+1}",
-            final_rf=self.it_dir+'/final_model.pkl',
-            full_data_fpath=full_file
+            final_rf=self.it_dir + "/final_model.pkl",
+            full_data_fpath=full_file,
         )
 
-    def RetrainAndPredict(self
-        ):
+    def RetrainAndPredict(self):
 
         """
         Description
@@ -476,30 +508,37 @@ class RecDMTA:
         """
 
         # Initialising the RF class
-        model = RF_model()
-        
+        model = RF_model(docking_column=self.docking_column)
+
         # Training on updated features
-        model.Train_Regressor(search_type='grid',
-                              hyper_params=self.hyper_params,
-                              features=self.updated_feats,
-                              targets=self.updated_targs,
-                              save_path=self.it_dir,
-                              save_final_model=True,
-                              plot_feat_importance=True)
-        
+        rf = model.Train_Regressor(
+            search_type="grid",
+            hyper_params=self.hyper_params,
+            features=self.updated_feats,
+            targets=self.updated_targs,
+            save_path=self.it_dir,
+            save_final_model=True,
+            plot_feat_importance=True,
+        )
+
+        self.it_rf_model = rf[0]
+
         # Setting up arguments for the _predict_for_files() function
-        args = [(i, desc_file, full_file, model)
-                for i, (desc_file, full_file) in enumerate(zip(self.desc_flist, self.full_flist))]
-        
+        args = [
+            (i, desc_file, full_file, model)
+            for i, (desc_file, full_file) in enumerate(
+                zip(self.desc_flist, self.full_flist)
+            )
+        ]
+
         # Multiprocessing through all full & descriptor files to make predictions
         with Pool(self.n_cpus) as pool:
             pool.map(self._predict_for_files, args)
-        
-        return
 
-    def RunIterations(self
-                      ):
-        
+        return self.it_rf_model
+
+    def RunIterations(self, held_out_test_feats: str, held_out_test_targs: str):
+
         """
         Description
         -----------
@@ -507,7 +546,8 @@ class RecDMTA:
 
         Parameters
         ---------
-        None
+        held_out_test_desc (str)     Path to csv with descriptors for held out data to make predictions on
+        held_out_test_targs (str)    Path to csv with descriptors for held out docking scores to compare against predictions
 
         Returns
         -------
@@ -516,7 +556,7 @@ class RecDMTA:
         if self.n_cpus == -1:
             self.n_cpus = mp.cpu_count()
 
-        print(f'Running with {self.n_cpus} CPUs')
+        print(f"Running with {self.n_cpus} CPUs")
 
         it_ran_ls = []
 
@@ -524,25 +564,24 @@ class RecDMTA:
         for self.iter in range(self.start_iter, self.start_iter + self.total_iters):
 
             # Checking to see if the iteration will run over the total runtime allocation
-            if self.time_ran + (self.avg_runtime*1.5) < self.max_it_runtime:
+            if self.time_ran + (self.avg_runtime * 1.5) < self.max_it_runtime:
                 it_start_time = time.time()
 
                 print(f"\n+===========Iteration: {self.iter}===========+\n")
-            
+
                 # Setting up the run directory, naming it _running/
                 self.it_dir = self.run_dir + "it" + str(self.iter) + "_running/"
                 mk_it_dir = Path(self.it_dir)
                 mk_it_dir.mkdir(exist_ok=True)
 
                 # Setting up the training_data directory
-                mk_train_data = mk_it_dir / 'training_data'
+                mk_train_data = mk_it_dir / "training_data"
                 mk_train_data.mkdir(exist_ok=True)
 
                 if self.iter - 1 != 0:
-                    self.prev_it_dir = self.run_dir + "it" + str(self.iter-1) + '/'                   
-                
-                self.SelectCmpds(iteration=self.iter,
-                                 prev_it_dir=self.prev_it_dir)
+                    self.prev_it_dir = self.run_dir + "it" + str(self.iter - 1) + "/"
+
+                self.SelectCmpds(iteration=self.iter, prev_it_dir=self.prev_it_dir)
 
                 self.RunDocking()
 
@@ -550,15 +589,50 @@ class RecDMTA:
 
                 self.RetrainAndPredict()
 
+                # Renaming iteration directory
+                rename_it_dir = Path(self.it_dir)
+                rename_it_dir.rename(Path(self.run_dir) / f"it{self.iter}")
+
+                # Predict on held out test set
+                cols = self.updated_feats.columns
+
+                test_targs = pd.read_csv(held_out_test_targs, index_col="ID")
+                test_targs = test_targs[test_targs[self.docking_column] != "False"][
+                    self.docking_column
+                ]
+                test_feats = pd.read_csv(held_out_test_feats, index_col="ID")
+                test_feats = test_feats[cols].loc[test_targs.index]
+                model = RF_model(docking_column=self.docking_column)
+
+                bias, sdep, mse, rmse, r2, true, pred = model._calculate_performance(
+                    feature_test=test_feats,
+                    target_test=test_targs,
+                    best_rf=self.it_rf_model,
+                )
+                stats = pd.DataFrame(
+                    {"Value": [bias, sdep, mse, rmse, r2]},
+                    index=["Bias", "SDEP", "MSE", "RMSE", "r2"],
+                )
+
+                held_out_dir = Path(self.run_dir + f"/it{self.iter}/held_out_test/")
+                held_out_dir.mkdir(exist_ok=True)
+
+                stats.to_csv(str(held_out_dir) + "/held_out_test_stats.csv")
+
+                pred_df = pd.DataFrame(
+                    index=test_feats.index,
+                    data=pred,
+                    columns=["pred_Affinity(kcal/mol)"],
+                )
+                pred_df.index.name = "ID"
+                pred_df.to_csv(str(held_out_dir) + "/held_out_test_preds.csv")
+
                 # Calculating timings
                 it_fin_time = time.time()
                 iter_time = it_fin_time - it_start_time
                 self.run_times.append(iter_time)
                 self.time_ran += iter_time
-
-                # Renaming iteration directory
-                rename_it_dir = Path(self.it_dir)
-                rename_it_dir.rename(Path(self.run_dir) / f'it{self.iter}')
+                it_ran_ls.append(self.iter)
 
                 print(f"\n+=========== Iteration Completed: {self.iter} ===========+")
                 print(f"Iteration Run Time: {round(iter_time, 1)}")

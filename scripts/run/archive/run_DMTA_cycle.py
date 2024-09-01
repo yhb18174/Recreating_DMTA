@@ -37,7 +37,7 @@ n_cpus = 40
 n_cmpds = 10
 mol_prefix = "HW-"
 rdkit_or_mordred = "rdkit"
-docking_column = 'CNN_Affinity'
+docking_column = "CNN_Affinity"
 
 # Setting runtimes
 time_ran = 0
@@ -55,11 +55,11 @@ docking_dir = PROJ_DIR + "/docking/PyMolGen/"
 results_dir = PROJ_DIR + f"/results/{rdkit_or_mordred}_desc/"
 run_dir = results_dir + sys.argv[1] + "/"
 init_model_dir = run_dir + "init_RF_model/it0/"
-test_dir = PROJ_DIR + '/datsets/test_data/'
+test_dir = PROJ_DIR + "/datsets/test_data/"
 dataset_file = test_dir + "PMG_rdkit_full_batch_1.csv.gz"
 desc_file = test_dir + "PMG_rdkit_desc_batch_1.csv.gz"
 docking_score_file = test_dir + "PMG_docking_?.csv.gz"
-chosen_mol_file = run_dir + 'chosen_mol.csv'
+chosen_mol_file = run_dir + "chosen_mol.csv"
 
 # Receptor
 receptor_path = PROJ_DIR + "/scripts/docking/receptors/4bw1_5_conserved_HOH.pdbqt"
@@ -102,19 +102,13 @@ for iter in range(start_iter, start_iter + total_iters):
             sel_idx = selector.random()
 
         elif sel_meth == "mp":
-            sel_idx = selector.best(
-                column="Affinity_pred", ascending=False
-            )
+            sel_idx = selector.best(column="Affinity_pred", ascending=False)
 
         elif sel_meth == "mu":
-            sel_idx = selector.best(
-                column="Uncertainty", ascending=False
-            )
+            sel_idx = selector.best(column="Uncertainty", ascending=False)
 
         elif sel_meth == "mpo":
-            sel_idx = selector.best(
-                column="MPO", ascending=True
-            )
+            sel_idx = selector.best(column="MPO", ascending=True)
 
         elif sel_meth == "rmp":
             sel_idx = selector.random_in_best(
@@ -122,9 +116,7 @@ for iter in range(start_iter, start_iter + total_iters):
             )
 
         elif sel_meth == "rmpo":
-            sel_idx = selector.random_in_best(
-                column="MPO", ascending=True, frac=0.1
-            )
+            sel_idx = selector.random_in_best(column="MPO", ascending=True, frac=0.1)
 
         df_select = pd.DataFrame(data=[], columns=[], index=sel_idx)
         df_select.index.rename("ID", inplace=True)
@@ -170,10 +162,7 @@ for iter in range(start_iter, start_iter + total_iters):
             dock_df = pd.read_csv(docking_file, index_col=0)
 
             # Indices of compounds for docking:
-            for_docking = GetUndocked(
-                dock_df=dock_df,
-                idxs_in_batch=idxs_in_batch 
-            )
+            for_docking = GetUndocked(dock_df=dock_df, idxs_in_batch=idxs_in_batch)
 
             # Change affinity_dock value for each molecule being docked as 'PD' (pending)
             da.edit_df(
@@ -229,10 +218,9 @@ for iter in range(start_iter, start_iter + total_iters):
                     )
 
             WaitForDocking(
-                dock_df,
-                idxs_in_batch=idxs_in_batch,
-                )
-            
+                dock_df, idxs_in_batch=idxs_in_batch,
+            )
+
             it_fin_time = time.time()
             time_ran += it_fin_time - it_start_time
             it_ran_ls.append(iter)
