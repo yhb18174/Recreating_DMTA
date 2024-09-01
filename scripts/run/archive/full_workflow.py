@@ -39,7 +39,7 @@ n_cpus = 40
 n_cmpds = 10
 mol_prefix = "PMG-"
 rdkit_or_mordred = "rdkit"
-docking_column = 'CNN_yffinity'
+docking_column = "CNN_yffinity"
 
 # Setting runtimes
 time_ran = 0
@@ -54,13 +54,13 @@ sel_meth = "rmp"
 # Directories (must end in '/')
 docking_dir = PROJ_DIR + "/docking/PyMolGen/"
 results_dir = PROJ_DIR + f"/results/test/"
-run_dir = results_dir + 'test_1/'
+run_dir = results_dir + "test_1/"
 init_model_dir = run_dir + "it0/"
-test_dir = PROJ_DIR + '/datsets/test_data/'
+test_dir = PROJ_DIR + "/datsets/test_data/"
 dataset_file = test_dir + "PMG_rdkit_1.csv.gz"
 desc_file = test_dir + "PMG_rdkit_desc_1.csv.gz"
 docking_score_file = test_dir + "PMG_docking_1.csv.gz"
-chosen_mol_file = run_dir + 'chosen_mol.csv'
+chosen_mol_file = run_dir + "chosen_mol.csv"
 
 
 # Receptor
@@ -80,7 +80,7 @@ for iter in range(start_iter, start_iter + total_iters):
     print(f"============= Running Iteration {iter} =============")
     if time_ran + max_it_runtime < max_runtime:
         it_start_time = time.time()
-        
+
         it_dir = run_dir + "it" + str(iter) + "_running/"
         it_dir = Path(it_dir)
         it_dir.mkdir(exist_ok=True)
@@ -89,12 +89,12 @@ for iter in range(start_iter, start_iter + total_iters):
             prev_it_dir = init_model_dir
 
         else:
-            prev_it_dir = run_dir + f'it{iter-1}'
+            prev_it_dir = run_dir + f"it{iter-1}"
 
-# ============================ #
-# Select next set of compounds #
-# ============================ #
-            
+        # ============================ #
+        # Select next set of compounds #
+        # ============================ #
+
         print("Selecting next set of compounds...")
 
         selector = Molecule_Selector(
@@ -110,19 +110,13 @@ for iter in range(start_iter, start_iter + total_iters):
             sel_idx = selector.random()
 
         elif sel_meth == "mp":
-            sel_idx = selector.best(
-                column="affinity_pred", ascending=False
-            )
+            sel_idx = selector.best(column="affinity_pred", ascending=False)
 
         elif sel_meth == "mu":
-            sel_idx = selector.best(
-                column="Uncertainty", ascending=False
-            )
+            sel_idx = selector.best(column="Uncertainty", ascending=False)
 
         elif sel_meth == "mpo":
-            sel_idx = selector.best(
-                column="MPO", ascending=True
-            )
+            sel_idx = selector.best(column="MPO", ascending=True)
 
         elif sel_meth == "rmp":
             sel_idx = selector.random_in_best(
@@ -130,13 +124,13 @@ for iter in range(start_iter, start_iter + total_iters):
             )
 
         elif sel_meth == "rmpo":
-            sel_idx = selector.random_in_best(
-                column="MPO", ascending=True, frac=0.1
-            )
+            sel_idx = selector.random_in_best(column="MPO", ascending=True, frac=0.1)
 
         df_select = pd.DataFrame(data=[], columns=[], index=sel_idx)
         df_select.index.rename("ID", inplace=True)
 
-        df_select["batch_no"] = [molid2batchno(molid, mol_prefix, 'all_mols') for molid in df_select.index]
+        df_select["batch_no"] = [
+            molid2batchno(molid, mol_prefix, "all_mols") for molid in df_select.index
+        ]
 
         print(df_select)

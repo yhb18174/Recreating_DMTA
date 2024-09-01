@@ -55,9 +55,7 @@ class Molecule_Selector:
             self.chosen_mol.index.name = "ID"
             self.chosen_mol.to_csv(self.chosen_mol_file, index_label="ID")
         else:
-            self.chosen_mol = pd.read_csv(
-                chosen_mol_file, index_col="ID"
-            )
+            self.chosen_mol = pd.read_csv(chosen_mol_file, index_col="ID")
 
         self.it = iteration
 
@@ -111,7 +109,7 @@ class Molecule_Selector:
 
         mols = []
         top_df_ls = [
-                pd.read_csv(preds_file, index_col="ID", compression="gzip")
+            pd.read_csv(preds_file, index_col="ID", compression="gzip")
             .sort_values(by=column, ascending=ascending)
             .head(1000)
             for preds_file in self.preds_files
