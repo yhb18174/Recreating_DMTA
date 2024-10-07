@@ -18,13 +18,17 @@
 #SBATCH --ntasks=40
 #
 # Specify (hard) runtime (HH:MM:SS)
-#SBATCH --time=168:00:000
+#SBATCH --time=168:00:00
 #
 # Job name
-#SBATCH --job-name=10_mp
+#SBATCH --job-name=50_mp
 #
 # Output file
 #SBATCH --output=slurm-%j.out
+
+## Email settings
+##SBATCH --mail-type=END,FAIL
+##SBATCH --mail-user=huw.williams.2018@uni.strath.ac.uk
 #=======================================================
 
 
@@ -42,12 +46,13 @@ module load anaconda/python-3.9.7
 # Modify the line below to run your program
 source activate phd_env
 
-n_cmpds=10
+n_cmpds=50
 sel_method="mp"
-start_iter=1
-total_iters=1
+start_iter=5
+total_iters=26
+run_date="20240916"
 
-python -u /users/yhb18174/Recreating_DMTA/scripts/run/run_DMTA.py $n_cmpds $sel_method $start_iter $total_iters
+python -u /users/yhb18174/Recreating_DMTA/scripts/run/run_DMTA.py $n_cmpds $sel_method $start_iter $total_iters $run_date
 
 #=========================================================
 # Epilogue script to record job endtime and runtime

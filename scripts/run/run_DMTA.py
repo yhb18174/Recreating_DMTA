@@ -10,12 +10,12 @@ start_iter = int(sys.argv[3])
 total_iters = int(sys.argv[4])
 n_cmpds = int(sys.argv[1])
 selection_method = sys.argv[2]
-run_name = f'20240830_{n_cmpds}_{selection_method}'
+run_name = f'{sys.argv[5]}_{n_cmpds}_{selection_method}'
 
 # Less Commonly Changed Variables
 docking_column = "Affinity(kcal/mol)"
 id_prefix = "PMG-"
-max_confs = 20
+max_confs = 100
 
 # Pathing
 full_data_fpath = (

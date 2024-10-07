@@ -17,7 +17,7 @@ from openeye import oechem
 oechem.OEThrow.SetLevel(oechem.OEErrorLevel_Error)
 from openeye import oequacpac, oeomega
 
-PROJ_DIR = str(Path(__file__).parent.parent.parent)
+PROJ_DIR = Path(__file__).parent.parent.parent
 
 # Find Openeye licence
 try:
@@ -30,11 +30,16 @@ def WaitForDocking(
     dock_csv: str,
     idxs_in_batch: list,
     scores_col: str,
-    check_interval: int=30,
-
+    check_interval: int,
+    ascending: bool=True
 ):
+    global PROJ_DIR
+
     while True:
+        # Read the docking CSV file
         dock_df = pd.read_csv(dock_csv, index_col='ID', dtype=str)
+        
+        # Filter the DataFrame for indices in the current batch
         df_with_idx = dock_df[dock_df.index.isin(idxs_in_batch)]
         pending_docking = df_with_idx[df_with_idx[scores_col] == 'PD']
 
@@ -43,6 +48,44 @@ def WaitForDocking(
             break
         
         print(f'Waiting for the following molecules to dock:\n{list(pending_docking.index)}')
+
+        ids_changed = []
+        for ids in pending_docking.index:
+            tar_file = PROJ_DIR / 'docking' / 'PyMolGen' / f'{ids}.tar.gz'
+
+            if tar_file.exists():
+                output_dir = PROJ_DIR / 'docking' / 'PyMolGen' / f'extracted_{ids}'
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Extract the tar.gz file
+                command = ['tar', '-xzf', str(tar_file), '-C', str(output_dir)]
+                try:
+                    subprocess.run(command, check=True)
+                    print(f"Successfully extracted {tar_file}.")
+                    
+                    # Unzip the .csv.gz file
+                    gz_file = output_dir / f'{ids}' / f'{ids}_all_scores.csv.gz'
+                    id_dock_scores = pd.read_csv(gz_file, index_col='ID').sort_values(ascending=ascending, by=scores_col)
+                    dock_score = id_dock_scores[scores_col].iloc[0]
+
+                    # Update the docking DataFrame
+                    dock_df.at[ids, scores_col] = dock_score
+                    dock_df.to_csv(dock_csv)  # Save the updated DataFrame
+
+                    # Remove the extracted directory
+                    rm_command = ["rm", "-r", str(output_dir)]
+                    subprocess.run(rm_command, check=True)
+                    print(f"Removed temporary files for {ids}.")
+
+                    ids_changed.append(ids)
+
+                except subprocess.CalledProcessError as e:
+                    print(f"Failed to extract {tar_file}. Error: {e}")
+        
+        if ids_changed:
+            pending_docking = pending_docking[~pending_docking.index.isin(ids_changed)]
+            print(f"Processed IDs removed from pending docking:\n{list(ids_changed)}")
+        # Wait for a while before checking again
         time.sleep(check_interval)
 
 def GetUndocked(
@@ -54,7 +97,6 @@ def GetUndocked(
     df[scores_col] = pd.to_numeric(df[scores_col], errors='coerce')
     undocked = df[df[scores_col].isna()]
     return undocked
-
 
 class Run_GNINA:
     """
@@ -83,7 +125,7 @@ class Run_GNINA:
         stripH: int = 1,
         seed: int = rand.randint(0, 2**31),
         cnn_scoring: str = "rescore",
-        gnina_path: str = f"{PROJ_DIR}/scripts/docking/gnina",
+        gnina_path: str = f"{str(PROJ_DIR)}/scripts/docking/gnina",
         env_name: str = "phd_env",
     ):
         """
@@ -101,7 +143,7 @@ class Run_GNINA:
         center (x,y,z) (float)      X, Y, Z coordinate of the center of the focussed box
         size (x, y, z) (float)      Size of the focussed box in the X, Y, Z dimensions
         exhaustivenedd (int)        Exhaustiveness of the global search
-        num_modes (int)             Number of binding modes to generate
+        num_modes (t1_1_rint)             Number of binding modes to generate
         cpu (int)                   Number of CPUs to use (default keep as 1)
         addH (int)                  Automatically adds hydrogens in ligands (0= off, 1= on)
         seed (int)                  Setting the random seed
@@ -149,7 +191,7 @@ class Run_GNINA:
         self.gnina_path = gnina_path
         self.env_name = env_name
 
-    def _mol_enhance(self, smi: str, sdf_fpath: str, num_confs: int=10):
+    def _mol_enhance(self, smi: str, sdf_fpath: str):
         """
         Description
         -----------
@@ -421,7 +463,7 @@ class Run_GNINA:
 
         return self.sdf_path_ls
 
-    def _create_submit_script(
+    def _create_save_script(
         self,
         molid: str,
         run_hrs: int,
@@ -507,28 +549,29 @@ fi
 
         script_name = str(Path(mol_dir)) + "/" f"{molid}_docking_script.sh"
 
-        print(script_name)
-
         with open(script_name, "w") as file:
             file.write(gnina_script)
 
         subprocess.run(["chmod", "+x", script_name], check=True)
-        print("Made script excecutable")
 
+        return script_name, mol_dir
+    
+    def _submit_script(self,
+                       docking_script_fpath: str,
+                       mol_dir: str):
+    
         try:
             result = subprocess.run(
-                ["sbatch", script_name], capture_output=True, text=True, check=True
+                ["sbatch", docking_script_fpath], capture_output=True, text=True, check=True
             )
 
-            with open(str(mol_dir)+'stdout.txt', 'w') as stdout:
-                stdout.write(stdout)
+            with open(str(mol_dir)+'stdout.txt', 'w') as stdout_file:
+                stdout_file.write(result.stdout)
 
-            with open(str(mol_dir)+'stderr.txt', 'w') as stderr:
-                stdout.write(stderr)
+            with open(str(mol_dir)+'stderr.txt', 'w') as stderr_file:
+                stderr_file.write(result.stderr)
 
             jobid = re.search(r"Submitted batch job (\d+)", result.stdout).group(1)
-            print(f"Submitted Job ID:\n{jobid}")
-
             return jobid
         except subprocess.CalledProcessError as e:
             print(f"Error in submitting job: {e}")
@@ -536,7 +579,7 @@ fi
         except Exception as e:
             print(e)
 
-    def SubmitJobs(self, run_hrs: int, username: str = "yhb18174", run_mins: int=0, use_multiprocessing=True):
+    def SubmitJobs(self, run_hrs: int, run_mins: int=0, use_multiprocessing=True):
         """
         Description
         -----------
@@ -552,7 +595,7 @@ fi
         if use_multiprocessing:
             with Pool() as pool:
                 results = pool.starmap(
-                    self._create_submit_script,
+                    self._create_save_script,
                     [
                         (
                             molid,
@@ -567,50 +610,24 @@ fi
                     ],
                 )
         
-            job_ids = [jobid for jobid in results if jobid is not None]
+            shell_scripts = [result[0] for result in results]
+            mol_dirs = [result[1] for result in results]
 
-        else:
-            job_ids = []
-            for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls):
-
-                jobid = self._create_submit_script(
-                            molid,
-                            run_hrs,
-                            mol_dir,
-                            f"all_confs_{molid}_pH74.sdf",
-                            f"{molid}_pose.sdf",
-                            f"{molid}.log",
-                            run_mins,
+            with Pool() as pool:
+                results = pool.starmap(
+                    self._submit_script,
+                    [
+                        (
+                            script,
+                            mol_dir
                         )
-                job_ids.append(jobid)
-
-        while True:
-            dock_jobs = []
-            squeue = subprocess.check_output(["squeue", "--users", username], text=True)
-            lines = squeue.splitlines()
-
-            job_lines = {
-                line.split()[0]: line for line in lines if len(line.split()) > 0
-            }
-
-            # Find which submitted job IDs are still in the squeue output
-            dock_jobs = set(job_id for job_id in job_ids if job_id in job_lines)
-
-            if not dock_jobs:
-                molids, top_cnn_scores, top_aff_scores = self.MakeCsv(
+                        for script, mol_dir in zip(shell_scripts, mol_dirs)
+                    ]
                 )
-                print(top_aff_scores)
-                print(top_cnn_scores)
-                self.CompressFiles()
-                return self.molid_ls, top_cnn_scores, top_aff_scores
             
-            if len(dock_jobs) < 10:
-                job_message = f'Waiting for the following jobs to complete: {", ".join(dock_jobs)}'
-            else:
-                job_message = f"Waiting for {len(dock_jobs)} jobs to finish"
+        job_ids = [jobid for jobid in results if jobid is not None]
 
-            print(f"\r{job_message.ljust(80)}", end="")
-            time.sleep(20)
+        return job_ids
 
     def MakeCsv(self, save_data: bool = True, mol_dir_path_ls: list=None, molid_ls: list=None):
         """
@@ -636,6 +653,7 @@ fi
         top_aff_ls = []
 
         for mol_dir, molid in zip(self.mol_dir_path_ls, self.molid_ls):
+            print(f"Making CSV for {molid}")
             combined_df = pd.DataFrame()
 
             with open(mol_dir + molid + ".log", "r") as file:
@@ -645,6 +663,21 @@ fi
             for n, line in enumerate(lines):
                 if line.startswith("mode |"):
                     table_start_indices.append(n)
+
+            print(f"Tables start on lines: {table_start_indices}")
+
+            if not table_start_indices:
+                combined_df = pd.DataFrame(
+                    data={
+                        "ID":[f'{molid}_conf_0_pose_0'],
+                        "conf_no":[0],
+                        "Pose_no": [0],
+                        "Affinity(kcal/mol)":["False"],
+                        "Intramol(kcal/mol)":["False"],
+                        "CNN_Pose_Score":["False"],
+                        "CNN_affinity": ["False"]
+                    }
+                )
             
             for j, start_idx in enumerate(table_start_indices):
                 df_lines = lines[start_idx + 3 :]
@@ -658,6 +691,7 @@ fi
                     if l.strip() == "" or l.startswith("mode |") or l.startswith("Using random seed"):
                         # Stopping if hit end of given table
                         break
+
                     items = re.split(r"\s+", l.strip())
                     pose_ls.append(items[0])
                     aff_ls.append(items[1])
@@ -665,19 +699,19 @@ fi
                     cnn_pose_score_ls.append(items[3])
                     cnn_aff_ls.append(items[4])
 
-                    docking_df = pd.DataFrame(
-                        data={
-                            "ID":[f'{molid}_conf_{j}_pose_{pose}' for pose in pose_ls],
-                            "conf_no":j,
-                            "Pose_no": pose_ls,
-                            "Affinity(kcal/mol)":aff_ls,
-                            "Intramol(kcal/mol)":intra_ls,
-                            "CNN_Pose_Score":cnn_pose_score_ls,
-                            "CNN_affinity": cnn_aff_ls
-                        }
-                    )
+                docking_df = pd.DataFrame(
+                    data={
+                        "ID":[f'{molid}_conf_{j}_pose_{pose}' for pose in pose_ls],
+                        "conf_no":j,
+                        "Pose_no": pose_ls,
+                        "Affinity(kcal/mol)":aff_ls,
+                        "Intramol(kcal/mol)":intra_ls,
+                        "CNN_Pose_Score":cnn_pose_score_ls,
+                        "CNN_affinity": cnn_aff_ls
+                    }
+                )
 
-                    combined_df = pd.concat([combined_df, docking_df], ignore_index=True)
+                combined_df = pd.concat([combined_df, docking_df], ignore_index=True)
             try:
                 max_cnn = combined_df['CNN_affinity'].astype(float).max()
                 min_aff = combined_df["Affinity(kcal/mol)"].astype(float).min()
@@ -689,12 +723,14 @@ fi
                 top_cnn_aff_ls.append(max_cnn)
                 top_aff_ls.append(min_aff)
                 
-        if save_data:
-            combined_df.to_csv(
-                f"{mol_dir}{molid}_all_scores.csv.gz",
-                compression="gzip",
-                index="ID",
-            )
+            if save_data:
+                print("Saving CSV...")
+                combined_df.to_csv(
+                    f"{mol_dir}{molid}_all_scores.csv.gz",
+                    compression="gzip",
+                    index="ID",
+                )
+
         return self.molid_ls, top_cnn_aff_ls, top_aff_ls
 
     def CompressFiles(self):

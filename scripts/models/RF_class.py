@@ -12,6 +12,7 @@ from sklearn.model_selection import cross_val_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import mean_squared_error, r2_score
+from scipy.stats import pearsonr
 import numpy as np
 import joblib
 from joblib import Parallel, delayed
@@ -95,8 +96,9 @@ class RF_model:
         mse = mean_squared_error(true, pred)
         rmse = np.sqrt(mse)
         r2 = r2_score(true, pred)
+        r_pearson, p_pearson = pearsonr(true, pred)
 
-        return bias, sdep, mse, rmse, r2, true, pred
+        return bias, sdep, mse, rmse, r2, r_pearson, p_pearson, true, pred
 
     def _fit_model_and_evaluate(
         self,
@@ -132,13 +134,14 @@ class RF_model:
         # Setting a random seed value
         rng = rand.randint(0, 2 ** 31)
 
-        print(f"Performing resample {n + 1}")
         resample_number = n + 1
 
         # Doing the train/test split
         feat_tr, feat_te, tar_tr, tar_te = train_test_split(
             features, targets, test_size=test_size, random_state=rng
         )
+
+        chembl_row_indices = [i for i, id in enumerate(tar_te.index) if id.startswith("CHEMBL")]
 
         # Convert DataFrames to NumPy arrays if necessary
         tar_tr = tar_tr.values.ravel() if isinstance(tar_tr, pd.DataFrame) else tar_tr
@@ -164,7 +167,7 @@ class RF_model:
                 n_iter=self.n_resamples,
                 cv=self.inner_cv,
                 scoring=self.scoring,
-                random_state=rand.randint(0, 2 ** 31),
+                random_state=rng,
             )
 
         # Training the model
@@ -179,10 +182,14 @@ class RF_model:
             target_test=tar_te, feature_test=feat_te, best_rf=best_rf
         )
 
+        ChEMBL_perf = self._calculate_performance(
+            target_test=tar_te[chembl_row_indices], feature_test=feat_te.iloc[chembl_row_indices], best_rf=best_rf
+        )
+
         # Isolating the true and predicted values used in performance calculations
         # so analysis can be done on them
-        true_vals_ls = performance[5]
-        pred_vals_ls = performance[6]
+        true_vals_ls = performance[-2]
+        pred_vals_ls = performance[-1]
         performance = performance[:-2]
 
         # Calculate cross-validation scores for the best estimator
@@ -201,6 +208,7 @@ class RF_model:
         return (
             search.best_params_,
             performance,
+            ChEMBL_perf,
             best_rf.feature_importances_,
             resample_number,
             true_vals_ls,
@@ -286,6 +294,7 @@ class RF_model:
                 Each element is a tuple containing information from each resample:
                 - Best parameters from hyperparameter search (dict)
                 - Performance metrics from the best RFR (tuple)
+                - Performance metrics on just the ChEMBL data from the best RFR (dict)
                 - Feature importances from the best RFR (array)
                 - Resample number (int)
                 - True target values used to create the performance metrics (array)
@@ -325,6 +334,7 @@ class RF_model:
         (
             best_params_ls,
             self.performance_list,
+            self.ChEMBL_perf_list,
             feat_importance_ls,
             self.resample_number_ls,
             self.true_vals_ls,
@@ -336,6 +346,7 @@ class RF_model:
         # remove potential issues
         self.best_params_df = pd.DataFrame(best_params_ls)
         best_params = self.best_params_df.mode().iloc[0].to_dict()
+
         for key, value in best_params.items():
             if key != "rf__max_features":
                 best_params[key] = int(value)
@@ -354,7 +365,39 @@ class RF_model:
             "RMSE": round(
                 float(np.mean([perf[3] for perf in self.performance_list])), 4
             ),
-            "r2": round(float(np.mean([perf[4] for perf in self.performance_list])), 4),
+            "r2": round(
+                float(np.mean([perf[4] for perf in self.performance_list])), 4
+            ),
+            "Pearson_r": round(
+                float(np.mean([perf[5] for perf in self.performance_list])), 4
+            ),
+            "Pearson_p": round(
+                float(np.mean([perf[6] for perf in self.performance_list])), 4
+            ),
+        }
+
+        self.ChEMBL_perf_dict = {
+            "Bias": round(
+                float(np.mean([perf[0] for perf in self.ChEMBL_perf_list])), 4
+            ),
+            "SDEP": round(
+                float(np.mean([perf[1] for perf in self.ChEMBL_perf_list])), 4
+            ),
+            "MSE": round(
+                float(np.mean([perf[2] for perf in self.ChEMBL_perf_list])), 4
+            ),
+            "RMSE": round(
+                float(np.mean([perf[3] for perf in self.ChEMBL_perf_list])), 4
+            ),
+            "r2": round(
+                float(np.mean([perf[4] for perf in self.ChEMBL_perf_list])), 4
+            ),
+            "Pearson_r": round(
+                float(np.mean([perf[5] for perf in self.ChEMBL_perf_list])), 4
+            ),
+            "Pearson_p": round(
+                float(np.mean([perf[6] for perf in self.ChEMBL_perf_list])), 4
+            ),
         }
 
         # Calculating average feature importances across all training resamples
@@ -389,10 +432,13 @@ class RF_model:
             joblib.dump(self.final_rf, f"{save_path}/final_model.pkl")
 
             with open(f"{save_path}/performance_stats.json", "w") as file:
-                json.dump(self.performance_dict, file)
+                json.dump(self.performance_dict, file, indent=4)
+            
+            with open(f"{save_path}/chembl_performance_stats.json", "w") as file:
+                json.dump(self.ChEMBL_perf_dict, file, indent=4)
 
             with open(f"{save_path}/best_params.json", "w") as file:
-                json.dump(best_params, file)
+                json.dump(best_params, file, indent=4)
 
             features.to_csv(
                 f"{save_path}/training_data/training_features.csv.gz",
@@ -405,12 +451,16 @@ class RF_model:
                 compression="gzip",
             )
 
+        print("Performance on total training data")
         print(self.performance_dict)
+        print("Performance on ChEMBL training data")
+        print(self.ChEMBL_perf_dict)
 
         return (
             self.final_rf,
             best_params,
             self.performance_dict,
+            self.ChEMBL_perf_dict,
             feat_importance_df,
             self.true_vals_ls,
             self.pred_vals_ls,
@@ -535,10 +585,16 @@ class RF_model:
 
         if save_data:
             plt.savefig(f"{save_path}/{filename}.png", dpi=dpi)
+            feat_importance_df.to_csv(f"{save_path}/feature_importance_df.csv")
 
         return
 
-    def _calc_mpo(self, full_data_fpath, preds_df, preds_col_name):
+    def _calc_mpo(
+                  self,
+                  full_data_fpath,
+                  preds_df,
+                  preds_col_name
+                  ):
         """
         Description
         -----------
@@ -574,7 +630,7 @@ class RF_model:
         preds_save_path: str = None,
         preds_filename: str = None,
         final_rf: str = None,
-        pred_col_name: str = "affinity_pred",
+        pred_col_name: str = "pred_Affinity(kcal/mol)",
         calc_mpo: bool = True,
         full_data_fpath: str = None,
     ):
