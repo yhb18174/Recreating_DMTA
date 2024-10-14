@@ -218,7 +218,8 @@ for iter in range(start_iter, start_iter + total_iters):
                     )
 
             WaitForDocking(
-                dock_df, idxs_in_batch=idxs_in_batch,
+                dock_df,
+                idxs_in_batch=idxs_in_batch,
             )
 
             it_fin_time = time.time()

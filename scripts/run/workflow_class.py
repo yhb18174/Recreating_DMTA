@@ -39,6 +39,7 @@ from mol_sel_fns import Molecule_Selector
 sys.path.insert(0, PROJ_DIR + "/scripts/misc/")
 from misc_functions import molid2batchno, WaitForJobs
 
+
 def read_csv_files(filename, columns=None):
     return pd.read_csv(filename, compression="gzip")
 
@@ -75,7 +76,7 @@ class RecDMTA:
         receptor_path: str = PROJ_DIR
         + "/scripts/docking/receptors/4bw1_5_conserved_HOH.pdbqt",
         max_runtime: int = 60 * 60 * 168,
-        max_it_runtime: int = 60 * 60 * 160,#168hours
+        max_it_runtime: int = 60 * 60 * 160,  # 168hours
         hyper_params: dict = {
             "rf__n_estimators": [400, 500],
             "rf__max_features": ["sqrt"],
@@ -83,7 +84,7 @@ class RecDMTA:
             "rf__min_samples_split": [2, 5],
             "rf__min_samples_leaf": [2, 4, 8],
         },
-        username: str = 'yhb18174'
+        username: str = "yhb18174",
     ):
         """
         Description
@@ -104,7 +105,7 @@ class RecDMTA:
         results_dir (str)           Path to the drectory containing all results
         init_model_dir (str)        Path to the initial model directory containing the predictions and
                                     initially trained model
-        chosen_mol_file (str)       Path to the chosen_mol file, if none present enter where you'd like 
+        chosen_mol_file (str)       Path to the chosen_mol file, if none present enter where you'd like
                                     the chosen mol file to be (end with the csv name too)
         selection_method (str)      Method used to select molecules for retraining:
                                             'r'     = random
@@ -192,12 +193,12 @@ class RecDMTA:
         -----------
         Function to select molecules from a the previous iterations directory and add them to the chosen_mol.csv
         file. Also creates a pd.DataFrame with the selected molecules, and the batch number they belong to.
-        
+
         Parameters
         ----------
         iteration (int)         Iteration which you are on, this saves which iteration each molecule was selected
                                 in the chosen_mol file
-        prev_it_dir (str)       Pathway to the precious iteration directory to select the molecules from the 
+        prev_it_dir (str)       Pathway to the precious iteration directory to select the molecules from the
                                 prediction files
         frac (float)            Fraction of the dataset to choose within when selecting on a portion of the data
 
@@ -256,27 +257,23 @@ class RecDMTA:
         print(table)
 
         return self.df_select
-    
+
     def _submit_jobs_wrapper(self, args):
         batch_no, idxs_in_batch = args
 
-        docking_score_batch_file = self.docking_score_files.replace(
-               "*", str(batch_no)
-            )
-        
+        docking_score_batch_file = self.docking_score_files.replace("*", str(batch_no))
+
         da = Dataset_Accessor(
-        original_path=docking_score_batch_file,
-        temp_suffix=".dock",
-        wait_time=30,
-            )
-        
-        
+            original_path=docking_score_batch_file,
+            temp_suffix=".dock",
+            wait_time=30,
+        )
+
         # Obtain exclusive access to the docking file
-        docking_file = da.get_exclusive_access() 
+        docking_file = da.get_exclusive_access()
         if docking_file is None:
             print(f"Failed to access file:\n{docking_score_batch_file}")
             print(f"Redocking of IDs:\n{idxs_in_batch} required")
-            
 
         dock_df = pd.read_csv(docking_file, index_col=0)
 
@@ -291,7 +288,6 @@ class RecDMTA:
             print(f"No molecules to dock in batch {batch_no}...")
             da.release_file()
             return None, None, docking_score_batch_file, [], idxs_in_batch
-
 
         # Change docking value fr each molecule being docked as 'PD' (pending)
         da.edit_df(
@@ -328,24 +324,23 @@ class RecDMTA:
         docker.ProcessMols(use_multiprocessing=True)
 
         # Docking the molecules and saving scores in for_docking
-        job_ids = docker.SubmitJobs(run_hrs=0,
-                                    run_mins=20,
-                                    use_multiprocessing=True)
-        
+        job_ids = docker.SubmitJobs(run_hrs=0, run_mins=20, use_multiprocessing=True)
+
         return docker, job_ids, docking_score_batch_file, molid_ls, idxs_in_batch
-    
-    def _docking_score_retrieval(self,
-                                 dock_scores_ls: list,
-                                 docking_batch_file: list,
-                                 mols_to_edit_ls: list,
-                                 idxs_in_batch: list
-                                 ):
-        
+
+    def _docking_score_retrieval(
+        self,
+        dock_scores_ls: list,
+        docking_batch_file: list,
+        mols_to_edit_ls: list,
+        idxs_in_batch: list,
+    ):
+
         da = Dataset_Accessor(
             original_path=docking_batch_file,
             temp_suffix=".dock",
             wait_time=30,
-            )
+        )
 
         if mols_to_edit_ls:
             da.get_exclusive_access()
@@ -362,23 +357,25 @@ class RecDMTA:
                 docking_batch_file,
                 idxs_in_batch=idxs_in_batch,
                 scores_col=self.docking_column,
-                check_interval=60
+                check_interval=60,
             )
 
         file_accessed = False
         while not file_accessed:
             try:
                 batch_dock_df = pd.read_csv(docking_batch_file, index_col=0)
-                file_accessed=True
+                file_accessed = True
             except FileNotFoundError as e:
                 print("Waiting for file to be accessable again...")
                 time.sleep(30)
 
         batch_dock_df = batch_dock_df.loc[idxs_in_batch]
-        
+
         return batch_dock_df
 
-    def RunDocking(self,):
+    def RunDocking(
+        self,
+    ):
         """
         Description
         -----------
@@ -392,11 +389,14 @@ class RecDMTA:
         -------
         pd.DataFrame object containing the docking information for the ids selected
         """
-        
+
         sjw_args = [
             (batch_no, idxs_in_batch)
             for batch_no, idxs_in_batch in (
-                self.df_select.reset_index().groupby("batch_no")["ID"].apply(list).items()
+                self.df_select.reset_index()
+                .groupby("batch_no")["ID"]
+                .apply(list)
+                .items()
             )
         ]
 
@@ -411,7 +411,9 @@ class RecDMTA:
         self.fin_dock_df = pd.DataFrame()
 
         for args in sjw_args:
-            docker, job_ids, ds_batch_file, mols_to_edit_ls, idx_ls = self._submit_jobs_wrapper(args)
+            docker, job_ids, ds_batch_file, mols_to_edit_ls, idx_ls = (
+                self._submit_jobs_wrapper(args)
+            )
 
             if docker is not None:
                 initialised_dockers.append(docker)
@@ -419,33 +421,34 @@ class RecDMTA:
                 all_docking_score_batch_files.append(ds_batch_file)
                 all_molid_ls.append(mols_to_edit_ls)
                 all_idxs_in_batch.append(idx_ls)
-            
+
             else:
-                docked_df = pd.read_csv(ds_batch_file, index_col='ID')
+                docked_df = pd.read_csv(ds_batch_file, index_col="ID")
                 all_dock_scores_ls.append(docked_df[self.docking_column].loc[idx_ls])
                 all_idxs_in_batch.append(idx_ls)
                 all_molid_ls.append(mols_to_edit_ls)
                 all_docking_score_batch_files.append(ds_batch_file)
-                                
+
         if all_job_id_ls:
             WaitForJobs(all_job_id_ls)
-        
+
         for docker in initialised_dockers:
             molids, top_cnn_scores, top_aff_scores = docker.MakeCsv()
             all_dock_scores_ls.append(top_aff_scores)
             docker.CompressFiles()
-        
+
         dsr_args = [
             (docking_scores_ls, docking_score_batch_file, molids, idxs_in_batch)
             for docking_scores_ls, docking_score_batch_file, molids, idxs_in_batch in zip(
-                all_dock_scores_ls, all_docking_score_batch_files, all_molid_ls, all_idxs_in_batch)
+                all_dock_scores_ls,
+                all_docking_score_batch_files,
+                all_molid_ls,
+                all_idxs_in_batch,
+            )
         ]
 
         with Pool() as pool:
-            results = pool.starmap(
-                                    self._docking_score_retrieval,
-                                    dsr_args
-                                    )
+            results = pool.starmap(self._docking_score_retrieval, dsr_args)
 
         self.fin_dock_df = pd.concat(results, axis=0)
 
@@ -456,16 +459,16 @@ class RecDMTA:
         Description
         -----------
         Function to obtain the previous training data and ammend the new, chosen molecules to it
-        
+
         Parameters
         ----------
         None
-        
+
         Returns
         -------
         x2 pd.DataFrame objects:      1- The dataframe of the updated target values
                                       2- The dataframe of the updated feature set
-        
+
         """
 
         # Obtaining the training data from the previous iteration
@@ -483,7 +486,7 @@ class RecDMTA:
         # Saving the columns which the previous iteration was trained on
         # (used to make sure the models are trained on the same set of features)
         self.prev_feat_cols = prev_feats.columns.tolist()
-    
+
         # Dropping any molecules which failed to dock
         self.fin_dock_df = self.fin_dock_df.dropna(subset=[self.docking_column])
 
@@ -550,16 +553,13 @@ class RecDMTA:
             full_data_fpath=full_file,
         )
 
-    def RetrainAndPredict(self,
-                          feats: pd.DataFrame,
-                          targs: pd.DataFrame):
-
+    def RetrainAndPredict(self, feats: pd.DataFrame, targs: pd.DataFrame):
         """
         Description
         -----------
         Function to firstly retrain a new model using the updated data from UpdateTrainingSet() function
         Then uses the trained to predict docking scores
-    
+
         Parameters
         ----------
         None
@@ -600,7 +600,6 @@ class RecDMTA:
         return self.it_rf_model
 
     def RunIterations(self, held_out_test_feats: str, held_out_test_targs: str):
-
         """
         Description
         -----------
@@ -647,10 +646,12 @@ class RecDMTA:
 
                 self.RunDocking()
 
-                new_targs, new_feats,= self.UpdateTrainingSet()
+                (
+                    new_targs,
+                    new_feats,
+                ) = self.UpdateTrainingSet()
 
-                self.RetrainAndPredict(targs=new_targs,
-                                       feats=new_feats)
+                self.RetrainAndPredict(targs=new_targs, feats=new_feats)
 
                 # Renaming iteration directory
                 rename_it_dir = Path(self.it_dir)
@@ -660,32 +661,38 @@ class RecDMTA:
                 cols = self.updated_feats.columns
                 model = RF_model(docking_column=self.docking_column)
 
-                held_out_targ_df = pd.read_csv(held_out_test_targs, index_col='ID')
-                held_out_targ_df = held_out_targ_df[held_out_targ_df[self.docking_column]!="False"]
+                held_out_targ_df = pd.read_csv(held_out_test_targs, index_col="ID")
+                held_out_targ_df = held_out_targ_df[
+                    held_out_targ_df[self.docking_column] != "False"
+                ]
                 held_out_targ_df = held_out_targ_df[self.docking_column]
 
-                held_out_feat_df = pd.read_csv(held_out_test_feats, index_col='ID')[cols]
+                held_out_feat_df = pd.read_csv(held_out_test_feats, index_col="ID")[
+                    cols
+                ]
                 held_out_feat_df = held_out_feat_df.loc[held_out_targ_df.index]
 
-                bias, sdep, mse, rmse, r2, pearson_r, pearson_p, true, pred = model._calculate_performance(
-                    feature_test=held_out_feat_df,
-                    target_test=held_out_targ_df,
-                    best_rf=self.it_rf_model,
+                bias, sdep, mse, rmse, r2, pearson_r, pearson_p, true, pred = (
+                    model._calculate_performance(
+                        feature_test=held_out_feat_df,
+                        target_test=held_out_targ_df,
+                        best_rf=self.it_rf_model,
+                    )
                 )
-                stats ={
-                    "Bias": bias, 
-                    "SDEP":sdep,
-                    "MSE": mse, 
-                    "RMSE": rmse, 
+                stats = {
+                    "Bias": bias,
+                    "SDEP": sdep,
+                    "MSE": mse,
+                    "RMSE": rmse,
                     "r2": r2,
                     "pearson_r": pearson_r,
-                    "pearson_p": pearson_p
+                    "pearson_p": pearson_p,
                 }
 
                 held_out_dir = Path(self.run_dir + f"/it{self.iter}/held_out_test/")
                 held_out_dir.mkdir(exist_ok=True)
 
-                with open(f"{str(held_out_dir)}/held_out_stats.json", 'w') as f:
+                with open(f"{str(held_out_dir)}/held_out_stats.json", "w") as f:
                     json.dump(stats, f, indent=4)
 
                 pred_df = pd.DataFrame(

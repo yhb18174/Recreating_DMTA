@@ -37,7 +37,6 @@ class Dataset_Formatter:
         core: str = None,
         keep_core: bool = True,
     ):
-
         """
         Description
         -----------
@@ -48,7 +47,7 @@ class Dataset_Formatter:
         inchi_list (str)        List of inchi strings you wish to convert to their canonical tautomer
         sub_point (int)         Atom number the fragments were added on to (for keeping original core tautomer)
         core (str)              Core you started with and want to maintain
-        keep_core (bool)        Flag to set whether or not you want to maintain the previously defined core 
+        keep_core (bool)        Flag to set whether or not you want to maintain the previously defined core
                                 after canonicalisation
 
         Returns
@@ -105,7 +104,7 @@ class Dataset_Formatter:
         Parameters
         ----------
         smiles (str)            SMILES string of molecule to be checked
-        keep_core (bool)        Flag to keep the original specied core, or allow it 
+        keep_core (bool)        Flag to keep the original specied core, or allow it
                                 to be tautomerised
         core (str)              SMILES string of the core you want to check against
         sub_point (int)         Point to stitch the fragment onto the sub_core
@@ -113,8 +112,8 @@ class Dataset_Formatter:
                                 (leave empty is this is just the previous core)
 
         Returns
-        -------        
-        has_core (bool)             Tells you whether or not the molecule has one of the tautomeric forms of 
+        -------
+        has_core (bool)             Tells you whether or not the molecule has one of the tautomeric forms of
                                     the specified. True means that one of the forms is present
         canon_smi (str)             SMILES string of the canonical form of the molecule after added onto
                                     sub_core
@@ -290,7 +289,7 @@ class Dataset_Formatter:
         prefix (str)        Prefix for the dataset
         pymolgen (bool)     Flag to say the molecule files are formatted by PyMolGen
         core (str)          Original core to use in the molecule canonicalisation (_process_inchi() function)
-        sub_point (int)     Point where fragments are substituted on previously defined core for the 
+        sub_point (int)     Point where fragments are substituted on previously defined core for the
                             molecule canonicalisation (_process_inchi() function)
 
         Returns
@@ -389,7 +388,6 @@ class Dataset_Formatter:
         return logp
 
     def _get_descriptors(self, mol, missingVal=None, descriptor_set: str = "RDKit"):
-
         """
         Description
         -----------
@@ -459,7 +457,7 @@ class Dataset_Formatter:
                                 column named 'Mol' containing RDKit mol objects
         descriptor_set (str)    Choose the descriptor set you want to generate in the (_get_descriptors() function)
                                 either 'RDKit' or 'Mordred'
-        
+
         Returns
         -------
         DataFrame containing all SMILES and their descriptors in the following format:
@@ -526,16 +524,16 @@ class Dataset_Formatter:
         Description
         -----------
         Converta a Data Frame to a string
-        
+
         Parameters
         ----------
         **kwargs    Arguments for the pd.DataFrame.to_csv() function
-         
+
         Returns
         -------
         String representation of a dataframe
-         
-         """
+
+        """
 
         string = StringIO()
         df.to_csv(string, **kwargs)
@@ -701,7 +699,7 @@ class Dataset_Formatter:
         Description
         -----------
         Function to filter undesirable molecules from the dataset
-        
+
         Parameters
         ----------
         mw_budget (int)                 Setting a molecular weight budget for molecules
@@ -767,7 +765,7 @@ class Dataset_Formatter:
         Description
         -----------
         Function to make workable pd.DataFrame chunks of data
-    
+
         Parameters
         ----------
         df (pd.DataFrame)       Data Frame you which to split into chunks
@@ -827,7 +825,7 @@ class Dataset_Formatter:
         save_chunk_filename (str)       Name to save chunks as, function will number them for you
         chunksize (int)                 Number of rows you want in each chunk of your Data Frame
         core (str)                      Original core to use in the molecule canonicalisation (_process_inchi() function)
-        sub_point (int)                 Point where fragments are substituted on previously defined core for the 
+        sub_point (int)                 Point where fragments are substituted on previously defined core for the
                                         molecule canonicalisation (_process_inchi() function)
         keep_core (bool)                Flag to keep original tautomer of core in the structure
         descriptor_set (str)            Descriptor set used as the descriptors
@@ -985,28 +983,27 @@ class mp_Dataset_Formatter:
         core: str = None,
         keep_core: bool = True,
     ):
-
         """
-            Description
-            -----------
-            Function that takes a list of inchis and canonicalises them
+        Description
+        -----------
+        Function that takes a list of inchis and canonicalises them
 
-            Parameters
-            ----------
-            inchi_list (str)        List of inchi strings you wish to convert to their canonical tautomer
-            sub_point (int)         Atom number the fragments were added on to (for keeping original core tautomer)
-            core (str)              Core you started with and want to maintain
-            keep_core (bool)        Flag to set whether or not you want to maintain the previously defined core 
-                                    after canonicalisation
+        Parameters
+        ----------
+        inchi_list (str)        List of inchi strings you wish to convert to their canonical tautomer
+        sub_point (int)         Atom number the fragments were added on to (for keeping original core tautomer)
+        core (str)              Core you started with and want to maintain
+        keep_core (bool)        Flag to set whether or not you want to maintain the previously defined core
+                                after canonicalisation
 
-            Returns
-            -------
-            3 lists:
-                    canon_mol_list = List of canonical RDKit mol objects
-                    frag_smi_list  = List of the canonical fragments added onto the original core
-                                    (only works if keep_core is True, core and sub point are defined)
-                    canon_smi_list = List of canonical SMILES strings, determined by RDKit
-            """
+        Returns
+        -------
+        3 lists:
+                canon_mol_list = List of canonical RDKit mol objects
+                frag_smi_list  = List of the canonical fragments added onto the original core
+                                (only works if keep_core is True, core and sub point are defined)
+                canon_smi_list = List of canonical SMILES strings, determined by RDKit
+        """
 
         # Converting all inchis into RDKit mol objects
 
@@ -1056,7 +1053,7 @@ class mp_Dataset_Formatter:
         Parameters
         ----------
         smiles (str)            SMILES string of molecule to be checked
-        keep_core (bool)        Flag to keep the original specied core, or allow it 
+        keep_core (bool)        Flag to keep the original specied core, or allow it
                                 to be tautomerised
         core (str)              SMILES string of the core you want to check against
         sub_point (int)         Point to stitch the fragment onto the sub_core
@@ -1064,8 +1061,8 @@ class mp_Dataset_Formatter:
                                 (leave empty is this is just the previous core)
 
         Returns
-        -------        
-        has_core (bool)             Tells you whether or not the molecule has one of the tautomeric forms of 
+        -------
+        has_core (bool)             Tells you whether or not the molecule has one of the tautomeric forms of
                                     the specified. True means that one of the forms is present
         canon_smi (str)             SMILES string of the canonical form of the molecule after added onto
                                     sub_core
@@ -1186,16 +1183,16 @@ class mp_Dataset_Formatter:
         Description
         -----------
         Converta a Data Frame to a string
-        
+
         Parameters
         ----------
         **kwargs    Arguments for the pd.DataFrame.to_csv() function
-         
+
         Returns
         -------
         String representation of a dataframe
-         
-         """
+
+        """
 
         string = StringIO()
         df.to_csv(string, **kwargs)
@@ -1440,7 +1437,6 @@ class mp_Dataset_Formatter:
         return logp
 
     def _get_descriptors(self, mol, missingVal=None, descriptor_set: str = "RDKit"):
-
         """
         Description
         -----------
@@ -1518,7 +1514,7 @@ class mp_Dataset_Formatter:
                                 column named 'Mol' containing RDKit mol objects
         descriptor_set (str)    Choose the descriptor set you want to generate in the (_get_descriptors() function)
                                 either 'RDKit' or 'Mordred'
-        
+
         Returns
         -------
         DataFrame containing all SMILES and their descriptors in the following format:
@@ -1614,7 +1610,7 @@ class mp_Dataset_Formatter:
         Description
         -----------
         Function to filter undesirable molecules from the dataset
-        
+
         Parameters
         ----------
         mw_budget (int)                 Setting a molecular weight budget for molecules
@@ -1676,7 +1672,7 @@ class mp_Dataset_Formatter:
         Description
         -----------
         Function to make workable pd.DataFrame chunks of data
-    
+
         Parameters
         ----------
         df (pd.DataFrame)       Data Frame you which to split into chunks
@@ -1768,7 +1764,7 @@ class Dataset_Accessor:
         Description
         -----------
         Function to gain exclusing access to a file
-        
+
         Parameters
         ----------
         original_path (str)     File name and its pathway

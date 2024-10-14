@@ -21,7 +21,7 @@
 #SBATCH --time=168:00:00
 #
 # Job name
-#SBATCH --job-name=50_mp
+#SBATCH --job-name=10_mp
 #
 # Output file
 #SBATCH --output=slurm-%j.out
@@ -46,11 +46,11 @@ module load anaconda/python-3.9.7
 # Modify the line below to run your program
 source activate phd_env
 
-n_cmpds=50
-sel_method="mp"
-start_iter=5
-total_iters=26
-run_date="20240916"
+n_cmpds=10
+sel_method="mu"
+start_iter=56
+total_iters=135
+run_date="20241011"
 
 python -u /users/yhb18174/Recreating_DMTA/scripts/run/run_DMTA.py $n_cmpds $sel_method $start_iter $total_iters $run_date
 

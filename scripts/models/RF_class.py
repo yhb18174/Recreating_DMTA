@@ -49,7 +49,7 @@ class RF_model:
         The object for inner CV.
 
         """
-        rng = rand.randint(0, 2 ** 31)
+        rng = rand.randint(0, 2**31)
 
         if cv_type == "kfold":
             self.inner_cv = KFold(n_splits=n_splits, shuffle=True, random_state=rng)
@@ -132,7 +132,7 @@ class RF_model:
         """
 
         # Setting a random seed value
-        rng = rand.randint(0, 2 ** 31)
+        rng = rand.randint(0, 2**31)
 
         resample_number = n + 1
 
@@ -141,7 +141,9 @@ class RF_model:
             features, targets, test_size=test_size, random_state=rng
         )
 
-        chembl_row_indices = [i for i, id in enumerate(tar_te.index) if id.startswith("CHEMBL")]
+        chembl_row_indices = [
+            i for i, id in enumerate(tar_te.index) if id.startswith("CHEMBL")
+        ]
 
         # Convert DataFrames to NumPy arrays if necessary
         tar_tr = tar_tr.values.ravel() if isinstance(tar_tr, pd.DataFrame) else tar_tr
@@ -183,7 +185,9 @@ class RF_model:
         )
 
         ChEMBL_perf = self._calculate_performance(
-            target_test=tar_te[chembl_row_indices], feature_test=feat_te.iloc[chembl_row_indices], best_rf=best_rf
+            target_test=tar_te[chembl_row_indices],
+            feature_test=feat_te.iloc[chembl_row_indices],
+            best_rf=best_rf,
         )
 
         # Isolating the true and predicted values used in performance calculations
@@ -284,7 +288,7 @@ class RF_model:
 
             Parameters
             ----------
-            batch_indices (list of int)     List of indices representing the current batch of 
+            batch_indices (list of int)     List of indices representing the current batch of
                                             resamples to process. Each index corresponds to
                                             a specific resample
 
@@ -365,9 +369,7 @@ class RF_model:
             "RMSE": round(
                 float(np.mean([perf[3] for perf in self.performance_list])), 4
             ),
-            "r2": round(
-                float(np.mean([perf[4] for perf in self.performance_list])), 4
-            ),
+            "r2": round(float(np.mean([perf[4] for perf in self.performance_list])), 4),
             "Pearson_r": round(
                 float(np.mean([perf[5] for perf in self.performance_list])), 4
             ),
@@ -389,9 +391,7 @@ class RF_model:
             "RMSE": round(
                 float(np.mean([perf[3] for perf in self.ChEMBL_perf_list])), 4
             ),
-            "r2": round(
-                float(np.mean([perf[4] for perf in self.ChEMBL_perf_list])), 4
-            ),
+            "r2": round(float(np.mean([perf[4] for perf in self.ChEMBL_perf_list])), 4),
             "Pearson_r": round(
                 float(np.mean([perf[5] for perf in self.ChEMBL_perf_list])), 4
             ),
@@ -433,7 +433,7 @@ class RF_model:
 
             with open(f"{save_path}/performance_stats.json", "w") as file:
                 json.dump(self.performance_dict, file, indent=4)
-            
+
             with open(f"{save_path}/chembl_performance_stats.json", "w") as file:
                 json.dump(self.ChEMBL_perf_dict, file, indent=4)
 
@@ -589,12 +589,7 @@ class RF_model:
 
         return
 
-    def _calc_mpo(
-                  self,
-                  full_data_fpath,
-                  preds_df,
-                  preds_col_name
-                  ):
+    def _calc_mpo(self, full_data_fpath, preds_df, preds_col_name):
         """
         Description
         -----------
@@ -610,7 +605,7 @@ class RF_model:
         Returns
         -------
         New pandas DataFrame object containing the MPO scores
-        
+
         """
         df = pd.read_csv(
             full_data_fpath, index_col="ID", usecols=["ID", "PFI", "oe_logp"]
@@ -635,23 +630,23 @@ class RF_model:
         full_data_fpath: str = None,
     ):
         """
-            Descripton
-            ----------
-            Function to take make predictions using the input RF model
+        Descripton
+        ----------
+        Function to take make predictions using the input RF model
 
-            Parameters
-            ----------
-            feats (pd.DataFrame)        DataFrame object containing all of the features used for predictions
-            save_preds (bool)           Flag to save the predictions
-            preds_save_path (str)       Path to save the predictions to
-            preds_filename (str)        Name to save the .csv.gz prediction dfs to
-            final_rf (str)              Path to the RF pickle file used to make predictions
-            pred_col_name (str)         Name of the column in filename to save predictions to
+        Parameters
+        ----------
+        feats (pd.DataFrame)        DataFrame object containing all of the features used for predictions
+        save_preds (bool)           Flag to save the predictions
+        preds_save_path (str)       Path to save the predictions to
+        preds_filename (str)        Name to save the .csv.gz prediction dfs to
+        final_rf (str)              Path to the RF pickle file used to make predictions
+        pred_col_name (str)         Name of the column in filename to save predictions to
 
-            Returns
-            -------
-            pd.DataFrame object containing all of the predictions
-            """
+        Returns
+        -------
+        pd.DataFrame object containing all of the predictions
+        """
 
         if final_rf is not None:
             rf_model = joblib.load(final_rf)

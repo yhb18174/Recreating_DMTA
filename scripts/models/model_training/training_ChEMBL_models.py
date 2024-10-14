@@ -43,7 +43,9 @@ feats_df = pd.read_csv(
     index_col="ID",
     compression="gzip",
 )
-save_path = "/users/yhb18174/Recreating_DMTA/results/rdkit_desc/init_RF_model/it0_diff_hyp_2/"
+save_path = (
+    "/users/yhb18174/Recreating_DMTA/results/rdkit_desc/init_RF_model/it0_diff_hyp_2/"
+)
 
 new_feat_df = feats_df
 new_feat_df = new_feat_df.drop(index=falsetargs.index)
@@ -65,45 +67,47 @@ desc_fpath = "/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/desc/rdkit/"
 desc_fprefix = "PMG_rdkit_desc_*.csv"
 desc_files = glob(desc_fpath + desc_fprefix)
 
-full_data_fpath = "/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/desc/rdkit/full_data/"
+full_data_fpath = (
+    "/users/yhb18174/Recreating_DMTA/datasets/PyMolGen/desc/rdkit/full_data/"
+)
 full_data_fprefix = "PMG_rdkit_*.csv"
 
 for n in range(len(desc_files)):
     print(f"\nPredicting scores for batch {n+1}:")
-    desc_pref = desc_fprefix.replace('*', str(n+1))
+    desc_pref = desc_fprefix.replace("*", str(n + 1))
     desc_file = desc_fpath + desc_pref
 
-    full_pref = full_data_fprefix.replace('*', str(n+1))
+    full_pref = full_data_fprefix.replace("*", str(n + 1))
     full_file = full_data_fpath + full_pref
 
-
-    feats = pd.read_csv(desc_file, index_col='ID')[new_feat_df.columns]
-    preds = model.Predict(feats=pd.DataFrame(feats), 
-                          save_preds=True, 
-                          calc_mpo=True,
-                          full_data_fpath=full_file,
-                          preds_filename = f"all_preds_{n+1}",
-                          preds_save_path=save_path)
+    feats = pd.read_csv(desc_file, index_col="ID")[new_feat_df.columns]
+    preds = model.Predict(
+        feats=pd.DataFrame(feats),
+        save_preds=True,
+        calc_mpo=True,
+        full_data_fpath=full_file,
+        preds_filename=f"all_preds_{n+1}",
+        preds_save_path=save_path,
+    )
     print(f"Preds {n+1} complete.")
 
 
 # Predicting on held out
-held_out_dir =  "/users/yhb18174/Recreating_DMTA/datasets/held_out_data/"
+held_out_dir = "/users/yhb18174/Recreating_DMTA/datasets/held_out_data/"
 
-it_held_out_dir = Path(save_path) / 'held_out_test'
+it_held_out_dir = Path(save_path) / "held_out_test"
 it_held_out_dir.mkdir(exist_ok=True)
 
-rf_pkl = f'{save_path}final_model.pkl'
+rf_pkl = f"{save_path}final_model.pkl"
 rf_model = joblib.load(rf_pkl)
 
-with open(rf_pkl, 'rb') as feats:
+with open(rf_pkl, "rb") as feats:
     data = pickle.load(feats)
 
-feats_df = pd.read_csv(
-   f"{held_out_dir}/PMG_held_out_desc.csv",
-    index_col="ID"
+feats_df = pd.read_csv(f"{held_out_dir}/PMG_held_out_desc.csv", index_col="ID")
+ho_df = pd.read_csv(f"{held_out_dir}/PMG_held_out_docked.csv", index_col="ID").drop(
+    columns=["Unnamed: 0"]
 )
-ho_df = pd.read_csv(f"{held_out_dir}/PMG_held_out_docked.csv", index_col="ID").drop(columns=['Unnamed: 0'])
 ho = ho_df[[docking_column]]
 falseho = ho_df[ho_df[docking_column] == "False"]
 ho_ = ho.drop(index=falseho.index)
@@ -117,16 +121,16 @@ new_feat_df = new_feat_df[data.tolist()]
 
 preds = rf_model.predict(new_feat_df)
 preds_df = pd.DataFrame(index=new_feat_df.index)
-preds_df['pred_Affinity(kcal/mol)'] = preds
-preds_df.to_csv(str(it_held_out_dir) + '/held_out_preds.csv', index_label='ID')
+preds_df["pred_Affinity(kcal/mol)"] = preds
+preds_df.to_csv(str(it_held_out_dir) + "/held_out_preds.csv", index_label="ID")
 
-ho_[f'pred_{docking_column}'] = preds
+ho_[f"pred_{docking_column}"] = preds
 
 true = ho_[docking_column].astype(float)
-pred = ho_[f'pred_{docking_column}'].astype(float)
+pred = ho_[f"pred_{docking_column}"].astype(float)
 
 # Create scatter plot
-sns.scatterplot(data=ho_, x=f'pred_{docking_column}', y=docking_column)
+sns.scatterplot(data=ho_, x=f"pred_{docking_column}", y=docking_column)
 
 # Get current axis
 ax = plt.gca()
@@ -138,10 +142,10 @@ y_ticks = np.linspace(ax.get_ylim()[0], ax.get_ylim()[1], 10)
 ax.set_xticks(x_ticks)
 ax.set_yticks(y_ticks)
 
-ax.set_title('Predicted DS score vs Actual DS score')
+ax.set_title("Predicted DS score vs Actual DS score")
 
 # Show plot
-plt.savefig(f'{held_out_dir}/init_preds_vs_actual.png')
+plt.savefig(f"{held_out_dir}/init_preds_vs_actual.png")
 
 errors = true - pred
 
@@ -153,13 +157,14 @@ rmse = np.sqrt(mse)
 r2 = r2_score(true, pred)
 
 dict = {
-    'Bias' : round(bias,3),
-    'SDEP': round(sdep,3),
-    'MSE': round(mse, 3),
-    'RMSE': round(rmse, 3),
-    'r2': round(r2, 3)
+    "Bias": round(bias, 3),
+    "SDEP": round(sdep, 3),
+    "MSE": round(mse, 3),
+    "RMSE": round(rmse, 3),
+    "r2": round(r2, 3),
 }
 
 import json
-with open(f'{save_path}/held_out_test/held_out_stats.json', 'w') as file:
+
+with open(f"{save_path}/held_out_test/held_out_stats.json", "w") as file:
     json.dump(dict, file, indent=4)

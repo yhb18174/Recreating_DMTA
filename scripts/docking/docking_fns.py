@@ -13,7 +13,8 @@ import warnings
 
 # Import Openeye Modules
 from openeye import oechem
-#Muting GPU warning
+
+# Muting GPU warning
 oechem.OEThrow.SetLevel(oechem.OEErrorLevel_Error)
 from openeye import oequacpac, oeomega
 
@@ -26,46 +27,51 @@ except KeyError:
     print("license file not found, please set $OE_LICENSE")
     sys.exit("Critical Error: license not found")
 
+
 def WaitForDocking(
     dock_csv: str,
     idxs_in_batch: list,
     scores_col: str,
     check_interval: int,
-    ascending: bool=True
+    ascending: bool = True,
 ):
     global PROJ_DIR
 
     while True:
         # Read the docking CSV file
-        dock_df = pd.read_csv(dock_csv, index_col='ID', dtype=str)
-        
+        dock_df = pd.read_csv(dock_csv, index_col="ID", dtype=str)
+
         # Filter the DataFrame for indices in the current batch
         df_with_idx = dock_df[dock_df.index.isin(idxs_in_batch)]
-        pending_docking = df_with_idx[df_with_idx[scores_col] == 'PD']
+        pending_docking = df_with_idx[df_with_idx[scores_col] == "PD"]
 
         if pending_docking.empty:
-            print('All docking scores present')
+            print("All docking scores present")
             break
-        
-        print(f'Waiting for the following molecules to dock:\n{list(pending_docking.index)}')
+
+        print(
+            f"Waiting for the following molecules to dock:\n{list(pending_docking.index)}"
+        )
 
         ids_changed = []
         for ids in pending_docking.index:
-            tar_file = PROJ_DIR / 'docking' / 'PyMolGen' / f'{ids}.tar.gz'
+            tar_file = PROJ_DIR / "docking" / "PyMolGen" / f"{ids}.tar.gz"
 
             if tar_file.exists():
-                output_dir = PROJ_DIR / 'docking' / 'PyMolGen' / f'extracted_{ids}'
+                output_dir = PROJ_DIR / "docking" / "PyMolGen" / f"extracted_{ids}"
                 output_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 # Extract the tar.gz file
-                command = ['tar', '-xzf', str(tar_file), '-C', str(output_dir)]
+                command = ["tar", "-xzf", str(tar_file), "-C", str(output_dir)]
                 try:
                     subprocess.run(command, check=True)
                     print(f"Successfully extracted {tar_file}.")
-                    
+
                     # Unzip the .csv.gz file
-                    gz_file = output_dir / f'{ids}' / f'{ids}_all_scores.csv.gz'
-                    id_dock_scores = pd.read_csv(gz_file, index_col='ID').sort_values(ascending=ascending, by=scores_col)
+                    gz_file = output_dir / f"{ids}" / f"{ids}_all_scores.csv.gz"
+                    id_dock_scores = pd.read_csv(gz_file, index_col="ID").sort_values(
+                        ascending=ascending, by=scores_col
+                    )
                     dock_score = id_dock_scores[scores_col].iloc[0]
 
                     # Update the docking DataFrame
@@ -81,22 +87,20 @@ def WaitForDocking(
 
                 except subprocess.CalledProcessError as e:
                     print(f"Failed to extract {tar_file}. Error: {e}")
-        
+
         if ids_changed:
             pending_docking = pending_docking[~pending_docking.index.isin(ids_changed)]
             print(f"Processed IDs removed from pending docking:\n{list(ids_changed)}")
         # Wait for a while before checking again
         time.sleep(check_interval)
 
-def GetUndocked(
-        dock_df: pd.DataFrame,
-        idxs_in_batch: list,
-        scores_col: str
-):
+
+def GetUndocked(dock_df: pd.DataFrame, idxs_in_batch: list, scores_col: str):
     df = dock_df.loc[idxs_in_batch]
-    df[scores_col] = pd.to_numeric(df[scores_col], errors='coerce')
+    df[scores_col] = pd.to_numeric(df[scores_col], errors="coerce")
     undocked = df[df[scores_col].isna()]
     return undocked
+
 
 class Run_GNINA:
     """
@@ -111,7 +115,7 @@ class Run_GNINA:
         molid_ls: list,
         smi_ls: list,
         receptor_path: str,
-        max_confs: int=1000,
+        max_confs: int = 1000,
         center_x: float = 14.66,
         center_y: float = 3.41,
         center_z: float = 10.47,
@@ -161,7 +165,9 @@ class Run_GNINA:
         """
         print(f"Random Seed:\n{seed}")
 
-        self.tar_mol_dir_path_ls = [f"{docking_dir}{molid}.tar.gz" for molid in molid_ls]
+        self.tar_mol_dir_path_ls = [
+            f"{docking_dir}{molid}.tar.gz" for molid in molid_ls
+        ]
         self.mol_dir_path_ls = [f"{docking_dir}{molid}/" for molid in molid_ls]
 
         for dir, tar_dir in zip(self.mol_dir_path_ls, self.mol_dir_path_ls):
@@ -213,7 +219,7 @@ class Run_GNINA:
         """
         Description
         -----------
-        Prepare molecule by generating 3D coordinates, calculating ionisation state 
+        Prepare molecule by generating 3D coordinates, calculating ionisation state
         at pH 7.4 and saving an image of the molecule.
             Parameters
         ----------
@@ -253,7 +259,7 @@ class Run_GNINA:
         except Exception as e:
             print(f"Failed to convert mol to pH 7.4 for the following reason:\n{e}")
             return None
-        
+
     def _make_ph74_sdfs(self):
         """
         Description
@@ -275,7 +281,7 @@ class Run_GNINA:
         ):
             mol_dir_path = Path(molid_dir)
 
-            if mol_dir_path.suffixes == ['.tar', '.gz']:
+            if mol_dir_path.suffixes == [".tar", ".gz"]:
                 subprocess.run(["tar", "-xzf", molid_dir], check=True)
                 path = self._mol_prep(smi=smi, molid=molid, mol_dir=molid_dir)
                 self.sdf_path_ls.append(str(path))
@@ -284,30 +290,24 @@ class Run_GNINA:
                 self.sdf_path_ls.append(str(path))
 
         return self.sdf_path_ls
-    
+
     def nonallowed_fragment_tautomers(self, molecule):
 
-        fragment_list = ["N=CO",
-                        "C=NCO",
-                        "C(O)=NC",
-                        "c=N",
-                        "N=c",
-                        "C=n",
-                        "n=C"]
-                        
+        fragment_list = ["N=CO", "C=NCO", "C(O)=NC", "c=N", "N=c", "C=n", "n=C"]
+
         for fragment in fragment_list:
             fragment_search = oechem.OESubSearch(fragment)
             oechem.OEPrepareSearch(molecule, fragment_search)
             if fragment_search.SingleMatch(molecule):
                 return False
                 break
-        
+
         return True
-        
+
     def _generate_conformers(self, sdf_fpath: str):
         lig_in_fname = Path(sdf_fpath).name
         lig_in_fpath = Path(sdf_fpath).parent
-        lig_out_fpath = str(lig_in_fpath) + '/all_confs_' + str(lig_in_fname)
+        lig_out_fpath = str(lig_in_fpath) + "/all_confs_" + str(lig_in_fname)
         ligand_prefix = str(lig_in_fname)[:-4]
 
         omega_opts = oeomega.OEOmegaOptions()
@@ -328,15 +328,14 @@ class Run_GNINA:
         ofs_sdf.SetFormat(oechem.OEFormat_SDF)
         ofs_sdf.open(lig_out_fpath)
 
-
         # Output Conformers in a mol2 file for showing in VMD
 
         ofs_mol2 = oechem.oemolostream()
         ofs_mol2.SetFormat(oechem.OEFormat_MOL2)
-        ofs_mol2.open(lig_out_fpath[:-4] + '.mol2')
+        ofs_mol2.open(lig_out_fpath[:-4] + ".mol2")
 
-        conf_isomer_ids = open(lig_out_fpath[:-4]+'_conf_isomers.dat', 'w')
-        conf_isomer_ids.write('conf_n,tauto,enant\n')
+        conf_isomer_ids = open(lig_out_fpath[:-4] + "_conf_isomers.dat", "w")
+        conf_isomer_ids.write("conf_n,tauto,enant\n")
 
         tautomer_opts = oequacpac.OETautomerOptions()
         tautomer_opts.SetMaxSearchTime(300)
@@ -346,7 +345,9 @@ class Run_GNINA:
         # enantiomer options
         flipper_opts = oeomega.OEFlipperOptions()
         flipper_opts.SetMaxCenters(12)
-        flipper_opts.SetEnumSpecifiedStereo(False) # Changed to False to preserve defined stereochemistry
+        flipper_opts.SetEnumSpecifiedStereo(
+            False
+        )  # Changed to False to preserve defined stereochemistry
         flipper_opts.SetEnumNitrogen(True)
         flipper_opts.SetWarts(False)
 
@@ -374,8 +375,8 @@ class Run_GNINA:
                     if ret_code == oeomega.OEOmegaReturnCode_Success:
                         n_confs[-1].append(ligand.NumConfs())
                         # Add SD data to indicate tautomer/enantiomer number:
-                        oechem.OESetSDData(ligand, 'tautomer_n', str(n_tauto))
-                        oechem.OESetSDData(ligand, 'isomer_n', str(n_enant[-1]))
+                        oechem.OESetSDData(ligand, "tautomer_n", str(n_tauto))
+                        oechem.OESetSDData(ligand, "isomer_n", str(n_enant[-1]))
                         oechem.OEWriteMolecule(ofs_sdf, ligand)
                         oechem.OEWriteMolecule(ofs_mol2, ligand)
                         conf_i += 1
@@ -383,29 +384,33 @@ class Run_GNINA:
                     n_disallowed += 1
         conf_isomer_ids.close()
 
-        with open(str(lig_in_fpath)+'/conf_gen.log', 'w') as log:
-            log.write(f'Conformer generation: tautomers: {n_tauto}\n')
-            log.write(f'                      enantiomers: {n_enant}\n')
-            log.write(f'                      number disallowed: {n_disallowed}\n')
-            log.write(f'                      final number: {sum(n_enant) - n_disallowed}\n')
-            log.write(f'                      number of individual 3D conformers: {n_confs}\n')
+        with open(str(lig_in_fpath) + "/conf_gen.log", "w") as log:
+            log.write(f"Conformer generation: tautomers: {n_tauto}\n")
+            log.write(f"                      enantiomers: {n_enant}\n")
+            log.write(f"                      number disallowed: {n_disallowed}\n")
+            log.write(
+                f"                      final number: {sum(n_enant) - n_disallowed}\n"
+            )
+            log.write(
+                f"                      number of individual 3D conformers: {n_confs}\n"
+            )
 
         ifs.close()
         ofs_sdf.close()
         ofs_mol2.close()
 
         return str(lig_out_fpath)
-    
+
     def _process_mol_wrapper(self, molid_dir, smi, molid):
         mol_dir_path = Path(molid_dir)
 
-        if mol_dir_path.suffixes == ['.tar', '.gz']:
+        if mol_dir_path.suffixes == [".tar", ".gz"]:
             subprocess.run(["tar", "-xzf", molid_dir], check=True)
 
         non_conf_path = self._mol_prep(smi=smi, molid=molid, mol_dir=molid_dir)
         conf_path = self._generate_conformers(non_conf_path)
 
-        return conf_path    
+        return conf_path
 
     def ProcessMols(self, use_multiprocessing):
 
@@ -413,17 +418,18 @@ class Run_GNINA:
         if use_multiprocessing:
             with Pool() as pool:
                 results = pool.starmap(
-                    self._process_mol_wrapper, zip(self.mol_dir_path_ls,
-                                                   self.smi_ls,
-                                                   self.molid_ls)
-                    )
+                    self._process_mol_wrapper,
+                    zip(self.mol_dir_path_ls, self.smi_ls, self.molid_ls),
+                )
             self.sdf_path_ls.extend(results)
 
         else:
             for molid_dir, smi, molid in zip(
                 self.mol_dir_path_ls, self.smi_ls, self.molid_ls
             ):
-                self.sdf_path_ls.append(self._process_mol_wrapper(molid_dir, smi, molid))
+                self.sdf_path_ls.append(
+                    self._process_mol_wrapper(molid_dir, smi, molid)
+                )
 
         return self.sdf_path_ls
 
@@ -471,8 +477,7 @@ class Run_GNINA:
         sdf_filename: str,
         output_filename: str,
         log_filename: str,
-        run_mins: int=0
-
+        run_mins: int = 0,
     ):
         """
         Description
@@ -555,20 +560,21 @@ fi
         subprocess.run(["chmod", "+x", script_name], check=True)
 
         return script_name, mol_dir
-    
-    def _submit_script(self,
-                       docking_script_fpath: str,
-                       mol_dir: str):
-    
+
+    def _submit_script(self, docking_script_fpath: str, mol_dir: str):
+
         try:
             result = subprocess.run(
-                ["sbatch", docking_script_fpath], capture_output=True, text=True, check=True
+                ["sbatch", docking_script_fpath],
+                capture_output=True,
+                text=True,
+                check=True,
             )
 
-            with open(str(mol_dir)+'stdout.txt', 'w') as stdout_file:
+            with open(str(mol_dir) + "stdout.txt", "w") as stdout_file:
                 stdout_file.write(result.stdout)
 
-            with open(str(mol_dir)+'stderr.txt', 'w') as stderr_file:
+            with open(str(mol_dir) + "stderr.txt", "w") as stderr_file:
                 stderr_file.write(result.stderr)
 
             jobid = re.search(r"Submitted batch job (\d+)", result.stdout).group(1)
@@ -579,7 +585,7 @@ fi
         except Exception as e:
             print(e)
 
-    def SubmitJobs(self, run_hrs: int, run_mins: int=0, use_multiprocessing=True):
+    def SubmitJobs(self, run_hrs: int, run_mins: int = 0, use_multiprocessing=True):
         """
         Description
         -----------
@@ -609,7 +615,7 @@ fi
                         for molid, mol_dir in zip(self.molid_ls, self.mol_dir_path_ls)
                     ],
                 )
-        
+
             shell_scripts = [result[0] for result in results]
             mol_dirs = [result[1] for result in results]
 
@@ -617,19 +623,21 @@ fi
                 results = pool.starmap(
                     self._submit_script,
                     [
-                        (
-                            script,
-                            mol_dir
-                        )
+                        (script, mol_dir)
                         for script, mol_dir in zip(shell_scripts, mol_dirs)
-                    ]
+                    ],
                 )
-            
+
         job_ids = [jobid for jobid in results if jobid is not None]
 
         return job_ids
 
-    def MakeCsv(self, save_data: bool = True, mol_dir_path_ls: list=None, molid_ls: list=None):
+    def MakeCsv(
+        self,
+        save_data: bool = True,
+        mol_dir_path_ls: list = None,
+        molid_ls: list = None,
+    ):
         """
         Description
         -----------
@@ -669,16 +677,16 @@ fi
             if not table_start_indices:
                 combined_df = pd.DataFrame(
                     data={
-                        "ID":[f'{molid}_conf_0_pose_0'],
-                        "conf_no":[0],
+                        "ID": [f"{molid}_conf_0_pose_0"],
+                        "conf_no": [0],
                         "Pose_no": [0],
-                        "Affinity(kcal/mol)":["False"],
-                        "Intramol(kcal/mol)":["False"],
-                        "CNN_Pose_Score":["False"],
-                        "CNN_affinity": ["False"]
+                        "Affinity(kcal/mol)": ["False"],
+                        "Intramol(kcal/mol)": ["False"],
+                        "CNN_Pose_Score": ["False"],
+                        "CNN_affinity": ["False"],
                     }
                 )
-            
+
             for j, start_idx in enumerate(table_start_indices):
                 df_lines = lines[start_idx + 3 :]
                 pose_ls = []
@@ -688,7 +696,11 @@ fi
                 cnn_aff_ls = []
 
                 for l in df_lines:
-                    if l.strip() == "" or l.startswith("mode |") or l.startswith("Using random seed"):
+                    if (
+                        l.strip() == ""
+                        or l.startswith("mode |")
+                        or l.startswith("Using random seed")
+                    ):
                         # Stopping if hit end of given table
                         break
 
@@ -701,19 +713,19 @@ fi
 
                 docking_df = pd.DataFrame(
                     data={
-                        "ID":[f'{molid}_conf_{j}_pose_{pose}' for pose in pose_ls],
-                        "conf_no":j,
+                        "ID": [f"{molid}_conf_{j}_pose_{pose}" for pose in pose_ls],
+                        "conf_no": j,
                         "Pose_no": pose_ls,
-                        "Affinity(kcal/mol)":aff_ls,
-                        "Intramol(kcal/mol)":intra_ls,
-                        "CNN_Pose_Score":cnn_pose_score_ls,
-                        "CNN_affinity": cnn_aff_ls
+                        "Affinity(kcal/mol)": aff_ls,
+                        "Intramol(kcal/mol)": intra_ls,
+                        "CNN_Pose_Score": cnn_pose_score_ls,
+                        "CNN_affinity": cnn_aff_ls,
                     }
                 )
 
                 combined_df = pd.concat([combined_df, docking_df], ignore_index=True)
             try:
-                max_cnn = combined_df['CNN_affinity'].astype(float).max()
+                max_cnn = combined_df["CNN_affinity"].astype(float).max()
                 min_aff = combined_df["Affinity(kcal/mol)"].astype(float).min()
             except:
                 max_cnn = "False"
@@ -722,7 +734,7 @@ fi
 
                 top_cnn_aff_ls.append(max_cnn)
                 top_aff_ls.append(min_aff)
-                
+
             if save_data:
                 print("Saving CSV...")
                 combined_df.to_csv(

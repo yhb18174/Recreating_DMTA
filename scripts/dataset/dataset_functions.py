@@ -691,9 +691,9 @@ class Dataset_Formatter:
             try:
                 desc = calc(mol)
                 for name, value in desc.items():
-                    yield str(name), np.float32(
-                        value
-                    ) if value is not None else missingVal
+                    yield str(name), (
+                        np.float32(value) if value is not None else missingVal
+                    )
             except Exception as e:
                 traceback.print_exc()
                 for descriptor in calc.descriptors:
@@ -824,7 +824,12 @@ class Dataset_Formatter:
         rows = chunk.to_dict("records")
 
         descriptors = [
-            (Chem.MolFromSmiles(row["SMILES"]), None, descriptor_set,) for row in rows
+            (
+                Chem.MolFromSmiles(row["SMILES"]),
+                None,
+                descriptor_set,
+            )
+            for row in rows
         ]
 
         with Pool() as pool:
@@ -856,7 +861,7 @@ class Dataset_Formatter:
                                 either 'RDKit' or 'Mordred'
         csv_list (list)         List of pregenerated csv files coming from the LoadData function.
         tmp_dir (str)           Save results in the tmp_dir
-        
+
         Returns
         -------
         1: List of file pathways to the descriptor files
@@ -1178,7 +1183,7 @@ class Dataset_Accessor:
         Description
         -----------
         Function to gain exclusing access to a file
-        
+
         Parameters
         ----------
         original_path (str)     File name and its pathway
